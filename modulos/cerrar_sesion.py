@@ -7,13 +7,13 @@ def render():
     # =========================
     validar_acceso("Cerrar Sesion")
 
-    st.title("馃毆 Cerrar sesi贸n")
+    st.title("🚪 Cerrar sesión")
 
-    st.info("Su sesi贸n ser谩 cerrada de forma segura.")
+    st.info("Su sesión será cerrada de forma segura.")
 
-    if st.button("Confirmar cierre de sesi贸n"):
+    if st.button("Confirmar cierre de sesión"):
         # =========================
-        # Cerrar conexi贸n a BD si existe
+        # Cerrar conexión a BD si existe
         # =========================
         conn = st.session_state.get("conn")
         if conn:
@@ -23,12 +23,12 @@ def render():
                 pass
 
         # =========================
-        # Limpiar sesi贸n
+        # Limpiar sesión
         # =========================
         st.session_state.clear()
 
-        st.success("鉁?Sesi贸n cerrada correctamente")
+        st.success("✅ Sesión cerrada correctamente")
         st.info("Volviendo al login...")
 
-        # Fuerza recarga para volver a app.py 鈫?login
+        # Fuerza recarga para volver a app.py → login
         st.rerun()
