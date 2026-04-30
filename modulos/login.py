@@ -3,7 +3,7 @@ from auth import login_usuario
 
 def render():
     st.image("logo.png", width=600)
-    st.title("Sistema de Procesamiento de Reporte de Unidades Administrativas - COFOPRI")
+    st.title("Procesamiento de Reporte de Unidades Administrativas - COFOPRI")
     st.markdown("""
     
     Ingrese sus Credenciales
