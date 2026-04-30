@@ -90,59 +90,59 @@ with st.sidebar:
 # =========================
 
 # Dashboards
-if opcion == "Dashboards":
+if opcion == "Depuración de Datos":
 
-    from modulos.dashboards import render
+    from modulos.depuracion import render
     render()
 
 
 # Asignaciones
-elif opcion == "Asignación de Producción":
+#elif opcion == "Asignación de Producción":
 
-    from modulos.asignaciones import render
-    render()
+#    from modulos.asignaciones import render
+#    render()
 
 
 # Cargar asignaciones
-elif opcion == "Cargar Asignaciones":
+#elif opcion == "Cargar Asignaciones":
 
-    from modulos.cargar_asignaciones import render
-    render()
+#    from modulos.cargar_asignaciones import render
+ #   render()
 
 
 # Reportes producción
-elif opcion == "Reportes Producción":
+#elif opcion == "Reportes Producción":
 
-    from modulos.produccion import render
-    render()
+#    from modulos.produccion import render
+#    render()
 
 
 # RRHH
-elif opcion == "RRHH":
+#elif opcion == "RRHH":
 
-    from modulos.rrhh import render
-    render()
+#    from modulos.rrhh import render
+#    render()
 
 
 # Eventos
-elif opcion == "Eventos":
+#elif opcion == "Eventos":
 
-    from modulos.eventos import render
-    render()
+#    from modulos.eventos import render
+#    render()
 
 
 # Historial
-elif opcion == "Historial":
+#elif opcion == "Historial":
 
-    from modulos.historial import render
-    render()
+#    from modulos.historial import render
+#    render()
 
 
 # Correcciones
-elif opcion == "Correcciones":
+#elif opcion == "Correcciones":
 
-    from modulos.correcciones import render
-    render()
+#    from modulos.correcciones import render
+#    render()
 
 
 # Cerrar sesión
