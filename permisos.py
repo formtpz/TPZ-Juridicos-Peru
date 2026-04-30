@@ -15,38 +15,25 @@ PERMISOS_POR_PERFIL = {
 
     # 2 = RRHH
     2: [
-        "RRHH",
+        "Depuración de Datos",
         "Cerrar Sesion"
     ],
 
     # 3 = Operador
     3: [
-        "Asignación de Producción",
-        "Reportes Producción",
-        "Eventos",
-        "Historial",
-        "Correcciones",
+        "Depuración de Datos",
         "Cerrar Sesion"
     ],
 
     # 4 = Control de Calidad
     4: [
-        "Asignación de Producción",
-        "Reportes Producción",
-        "Eventos",
-        "Historial",
-        "Correcciones",
+        "Depuración de Datos",
         "Cerrar Sesion"
     ],
 
     # 5 = Supervisor
     5: [
-        "Asignación de Producción",
-        "Dashboards",
-        "Reportes Producción",
-        "Eventos",
-        "Historial",
-        "Correcciones",
+        "Depuración de Datos",
         "Cerrar Sesion"
     ],
 }
