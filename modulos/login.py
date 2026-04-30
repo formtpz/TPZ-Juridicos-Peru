@@ -2,7 +2,7 @@ import streamlit as st
 from auth import login_usuario
 
 def render():
-    st.image("logo.png", width=600)
+    st.image("logo.png", width=300)
     st.title("Procesamiento de Reporte de Unidades Administrativas - COFOPRI")
     st.markdown("""
     
