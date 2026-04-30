@@ -4,3 +4,5 @@ python-dotenv
 pytz
 folium
 streamlit-folium
+pandas
+openpyxl
