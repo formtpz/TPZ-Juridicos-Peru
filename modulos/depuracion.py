@@ -144,7 +144,7 @@ def render():
                         st.download_button(
                             label="⬇️ Descargar Excel filtrado",
                             data=output,
-                            file_name="depurado_catastro.xlsx",
+                            file_name="Reporte_Unidades_Administrativas_Filtrado.xlsx",
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                         )
                     else:
