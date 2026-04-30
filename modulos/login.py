@@ -4,6 +4,9 @@ from auth import login_usuario
 def render():
     st.image("logo.png", width=600)
     st.title("Ingreso al sistema")
+    st.markdown("""
+    Sistema de Procesamiento de Reporte de Unidades Administrativas - COFOPRI
+    """)
 
     cedula = st.text_input("Cédula")
     password = st.text_input("Contraseña", type="password")
