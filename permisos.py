@@ -9,14 +9,7 @@ PERMISOS_POR_PERFIL = {
 
     # 1 = Administrador / Coordinador
     1: [
-        "Dashboards",
-        "RRHH",
-        "Cargar Asignaciones",
-        "Asignación de Producción",
-        "Reportes Producción",
-        "Eventos",
-        "Historial",
-        "Correcciones",
+        "Depuración de Datos",
         "Cerrar Sesion"
     ],
 
