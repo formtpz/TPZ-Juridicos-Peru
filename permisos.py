@@ -10,30 +10,35 @@ PERMISOS_POR_PERFIL = {
     # 1 = Administrador / Coordinador
     1: [
         "Depuración de Datos",
+        "Reglas",
         "Cerrar Sesion"
     ],
 
     # 2 = RRHH
     2: [
         "Depuración de Datos",
+        "Reglas",
         "Cerrar Sesion"
     ],
 
     # 3 = Operador
     3: [
         "Depuración de Datos",
+        "Reglas",
         "Cerrar Sesion"
     ],
 
     # 4 = Control de Calidad
     4: [
         "Depuración de Datos",
+        "Reglas",
         "Cerrar Sesion"
     ],
 
     # 5 = Supervisor
     5: [
         "Depuración de Datos",
+        "Reglas",
         "Cerrar Sesion"
     ],
 }
