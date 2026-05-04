@@ -89,17 +89,17 @@ with st.sidebar:
 # ROUTER DE MÓDULOS
 # =========================
 
-# Dashboards
+# Depuracion de Datos
 if opcion == "Depuración de Datos":
 
     from modulos.depuracion import render
     render()
 
 
-# Asignaciones
-#elif opcion == "Asignación de Producción":
+# Reglas
+#elif opcion == "Reglas":
 
-#    from modulos.asignaciones import render
+#    from modulos.reglas import render
 #    render()
 
 
