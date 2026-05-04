@@ -101,7 +101,7 @@ def cargar_y_ejecutar_reglas(dataframes):
 # Interfaz principal de Streamlit
 # ======================================================
 def render():
-    validar_acceso("Validación Relacional")   # Control de acceso similar a depuracion.py
+    validar_acceso("Reglas")   # Control de acceso Streamlit similar a depuracion.py
 
     st.title("🔍 Validación Relacional de Insumos Catastrales")
     st.markdown("""
