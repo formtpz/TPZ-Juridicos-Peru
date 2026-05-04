@@ -4,6 +4,7 @@ import pandas as pd
 import os
 import requests
 import importlib.util
+import types
 from io import BytesIO
 from datetime import datetime
 from permisos import validar_acceso
@@ -78,9 +79,10 @@ def cargar_y_ejecutar_reglas(dataframes):
             codigo = requests.get(url).text
 
             # Crear un módulo en memoria y ejecutarlo
-            modulo = type(importlib.util.module_from_spec(
-                importlib.util.spec_from_loader(nombre)
-            ))(nombre)
+            modulo = types.ModuleType(nombre)
+            #modulo = type(importlib.util.module_from_spec(
+            #    importlib.util.spec_from_loader(nombre)
+            #))(nombre)
             exec(codigo, modulo.__dict__)
 
             if hasattr(modulo, 'validar'):
