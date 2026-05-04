@@ -11,8 +11,8 @@ from permisos import validar_acceso
 # ======================================================
 # Configuración del repositorio GitHub (archivos estáticos)
 # ======================================================
-GITHUB_OWNER = "TU_USUARIO"          # Dueño del repositorio
-GITHUB_REPO = "TU_REPO"              # Nombre del repositorio
+GITHUB_OWNER = "formtpz"          # Dueño del repositorio
+GITHUB_REPO = "TPZ-Juridicos-Peru"              # Nombre del repositorio
 GITHUB_BRANCH = "main"               # Rama de donde leer
 REGLA_FOLDER = "Reglas"              # Carpeta dentro del repo con las reglas .py
 RENTAS_FILE = "Rentas_resumidos/RENTAS_SJM_2025_RESUMEN.xlsx"  # Ruta al archivo de rentas en el repo
