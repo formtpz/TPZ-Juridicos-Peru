@@ -97,10 +97,10 @@ if opcion == "Depuración de Datos":
 
 
 # Reglas
-#elif opcion == "Reglas":
+elif opcion == "Reglas":
 
-#    from modulos.reglas import render
-#    render()
+    from modulos.reglas import render
+    render()
 
 
 # Cargar asignaciones
