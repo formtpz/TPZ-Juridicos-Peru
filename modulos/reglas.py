@@ -116,7 +116,7 @@ def render():
     nombres_rentas = [r["name"] for r in lista_rentas]
 
     archivo_rentas_seleccionado = st.selectbox(
-        "📂 Selecciona el archivo de Rentas (Desde GitHub)",
+        "📂 Selecciona el archivo de Rentas",
         options=nombres_rentas,
         index=0 if nombres_rentas else None,
         help="Elige la base de rentas contra la cual quieres cruzar la información."
@@ -154,7 +154,7 @@ def render():
                 st.error(f"Error al leer archivos locales: {e}")
                 return
 
-        with st.spinner(f"📥 Descargando '{archivo_rentas_seleccionado}' desde GitHub..."):
+        with st.spinner(f"📥 Descargando '{archivo_rentas_seleccionado}'..."):
             df_rentas = obtener_rentas(url_rentas_seleccionado)
             if df_rentas is not None:
                 dataframes['rentas'] = df_rentas
