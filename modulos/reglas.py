@@ -1,4 +1,3 @@
-# main.py (versión Streamlit)
 import streamlit as st
 import pandas as pd
 import os
@@ -16,11 +15,12 @@ GITHUB_OWNER = "formtpz"          # Dueño del repositorio
 GITHUB_REPO = "TPZ-Juridicos-Peru"              # Nombre del repositorio
 GITHUB_BRANCH = "main"               # Rama de donde leer
 REGLA_FOLDER = "Reglas"              # Carpeta dentro del repo con las reglas .py
-RENTAS_FILE = "Rentas_resumidos/RENTAS_SJM_2025_RESUMEN.xlsx"  # Ruta al archivo de rentas en el repo
+RENTAS_FOLDER = "Rentas_resumidos"   # Carpeta dentro del repo con los archivos de rentas
 
 # ======================================================
 # Funciones auxiliares para obtener datos desde GitHub
 # ======================================================
+@st.cache_data(ttl=300) # Guarda en caché por 5 minutos para no saturar la API de GitHub
 def obtener_lista_reglas():
     """
     Obtiene la lista de archivos .py del directorio de reglas en GitHub.
@@ -44,11 +44,35 @@ def obtener_lista_reglas():
         st.error(f"Error de conexión con GitHub: {e}")
         return []
 
-def obtener_rentas():
+@st.cache_data(ttl=300)
+def obtener_lista_rentas():
     """
-    Descarga el archivo de rentas desde GitHub y lo carga en un DataFrame.
+    Obtiene la lista de archivos Excel del directorio de rentas en GitHub.
+    Retorna una lista de diccionarios con 'name' y 'download_url'.
     """
-    url_raw = f"https://raw.githubusercontent.com/{GITHUB_OWNER}/{GITHUB_REPO}/{GITHUB_BRANCH}/{RENTAS_FILE}"
+    url_api = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/contents/{RENTAS_FOLDER}?ref={GITHUB_BRANCH}"
+    headers = {"Accept": "application/vnd.github.v3+json"}
+    try:
+        respuesta = requests.get(url_api, headers=headers)
+        if respuesta.status_code == 200:
+            archivos = respuesta.json()
+            return [
+                {"name": f["name"], "download_url": f["download_url"]}
+                for f in archivos
+                # Filtramos solo archivos Excel
+                if f["name"].endswith(".xlsx") or f["name"].endswith(".xls")
+            ]
+        else:
+            st.error(f"Error al acceder a la carpeta de rentas en GitHub (código {respuesta.status_code}).")
+            return []
+    except Exception as e:
+        st.error(f"Error de conexión con GitHub: {e}")
+        return []
+
+def obtener_rentas(url_raw):
+    """
+    Descarga el archivo de rentas específico desde GitHub y lo carga en un DataFrame.
+    """
     try:
         return pd.read_excel(url_raw)
     except Exception as e:
@@ -80,9 +104,6 @@ def cargar_y_ejecutar_reglas(dataframes):
 
             # Crear un módulo en memoria y ejecutarlo
             modulo = types.ModuleType(nombre)
-            #modulo = type(importlib.util.module_from_spec(
-            #    importlib.util.spec_from_loader(nombre)
-            #))(nombre)
             exec(codigo, modulo.__dict__)
 
             if hasattr(modulo, 'validar'):
@@ -109,20 +130,41 @@ def render():
     st.markdown("""
     Sube los archivos de **Unidades Administrativas** e **Ingresos**.
     
-    El archivo de **Rentas** y las **reglas de validación** se obtienen automáticamente desde el repositorio de GitHub configurado.
+    El archivo de **Rentas** se selecciona desde el repositorio y las **reglas de validación** se obtienen automáticamente.
     """)
 
+    # 1. Obtener archivos de Rentas disponibles para el desplegable
+    lista_rentas = obtener_lista_rentas()
+    nombres_rentas = [r["name"] for r in lista_rentas]
+
+    # Desplegable para seleccionar el archivo de Rentas
+    archivo_rentas_seleccionado = st.selectbox(
+        "📂 Selecciona el archivo de Rentas (Desde GitHub)",
+        options=nombres_rentas,
+        index=0 if nombres_rentas else None,
+        help="Elige el archivo de rentas contra el cual quieres cruzar la información."
+    )
+
+    st.markdown("---")
+
     # Carga de archivos (inputs del usuario)
-    archivo_unidades = st.file_uploader("📂 Reporte de Unidades Administrativas", type=["xlsx", "xls"],
+    archivo_unidades = st.file_uploader("📂 Reporte de Unidades Administrativas (Local)", type=["xlsx", "xls"],
                                         key="main_unidades")
-    archivo_ingresos = st.file_uploader("📂 Reporte de Ingresos", type=["xlsx", "xls"],
+    archivo_ingresos = st.file_uploader("📂 Reporte de Ingresos (Local)", type=["xlsx", "xls"],
                                         key="main_ingresos")
 
     # Botón para ejecutar la validación
     if st.button("🚀 Ejecutar validación", type="primary"):
         if not archivo_unidades or not archivo_ingresos:
-            st.error("Es necesario cargar ambos archivos (Unidades e Ingresos).")
+            st.error("Es necesario cargar ambos archivos locales (Unidades e Ingresos).")
             return
+            
+        if not archivo_rentas_seleccionado:
+            st.error("No se ha seleccionado un archivo de Rentas válido del repositorio.")
+            return
+
+        # Buscar la URL de descarga correspondiente al archivo seleccionado
+        url_rentas_seleccionado = next(r["download_url"] for r in lista_rentas if r["name"] == archivo_rentas_seleccionado)
 
         # 1. Cargar los DataFrames desde los uploaders
         dataframes = {}
@@ -140,12 +182,12 @@ def render():
             st.error(f"Error al leer Ingresos: {e}")
             return
 
-        # 2. Cargar Rentas desde GitHub
-        with st.spinner("📥 Descargando archivo de Rentas desde GitHub..."):
-            df_rentas = obtener_rentas()
+        # 2. Cargar Rentas seleccionadas desde GitHub
+        with st.spinner(f"📥 Descargando '{archivo_rentas_seleccionado}' desde GitHub..."):
+            df_rentas = obtener_rentas(url_rentas_seleccionado)
             if df_rentas is not None:
                 dataframes['rentas'] = df_rentas
-                st.success("✅ Rentas cargadas desde GitHub")
+                st.success(f"✅ Archivo de Rentas cargado exitosamente")
             else:
                 st.warning("⚠️ No se pudo cargar Rentas. La validación continuará sin ese archivo (si las reglas lo requieren, pueden fallar).")
 
