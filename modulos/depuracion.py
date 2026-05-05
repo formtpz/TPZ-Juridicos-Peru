@@ -172,6 +172,12 @@ def render():
 
                         st.dataframe(df_output.head(20), use_container_width=True)
 
+                        # --- LÓGICA PARA EL NOMBRE DINÁMICO ---
+                        # archivo.name contiene el nombre original (ej: "datos.xlsx")
+                        nombre_original = archivo.name
+                        nombre_salida = f"Filtrado_{nombre_original}"
+                        # ---------------------------------------
+
                         # Descarga
                         output = BytesIO()
                         with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -181,7 +187,7 @@ def render():
                         st.download_button(
                             label="⬇️ Descargar Excel filtrado",
                             data=output,
-                            file_name="Filtrado_Reporte_Unidades_Administrativas.xlsx",
+                            file_name=nombre_salida, # <--- Usamos la variable dinámica aquí
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                         )
                     else:
