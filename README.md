@@ -2,17 +2,17 @@ Validación de reglas lógicas de COFOPRI:
 1. Reglas de Unidades Administrativas (Prefijo UA)
 Analizan la consistencia interna del archivo de Unidades Administrativas.
   •	UA-1001: Dependencia de Partida Registral
-    o	Campos Evaluados: Tipo de Documento, Tipo de Partida Registral, Número de Partida Registral.
-    o	Condición de Error: El "Número de Partida Registral" está vacío a pesar de que el "Tipo de Documento" y el "Tipo de Partida Registral" sí contienen información.
+    a. Campos Evaluados: Tipo de Documento, Tipo de Partida Registral, Número de Partida Registral.
+    b. Condición de Error: El "Número de Partida Registral" está vacío a pesar de que el "Tipo de Documento" y el "Tipo de Partida Registral" sí contienen información.
   •	UA-1002: Coherencia de Clasificación de Casa Habitación
-    o	Campos Evaluados: Clasificación Del Predio, Descripción Del Uso.
-    o	Condición de Error: La "Clasificación Del Predio" es CASA HABITACIÓN, pero la "Descripción Del Uso" registra un valor distinto a VIVIENDA.
+    a. Campos Evaluados: Clasificación Del Predio, Descripción Del Uso.
+    b.	Condición de Error: La "Clasificación Del Predio" es CASA HABITACIÓN, pero la "Descripción Del Uso" registra un valor distinto a VIVIENDA.
   •	UA-1003: Validación Lógica de Unidades Físicas (Agrupación por Lote)
-    o	Campos Evaluados: Código de Referencia Catastral (CRC), Predio Catastral En, Tipo de Edificación.
-    o	Condición de Error:
-    	Si el lote físico tiene exactamente 1 unidad y NO está registrado como PREDIO INDEPENDIENTE.
-    	Si el lote físico tiene más de 1 unidad y SÍ está registrado como PREDIO INDEPENDIENTE.
-  o	Excepción/Mensaje: El sistema genera un mensaje de error altamente específico si el "Tipo de Edificación" es CASA/CHALET, para orientar mejor al digitador sobre la naturaleza del inmueble.
+    a. Campos Evaluados: Código de Referencia Catastral (CRC), Predio Catastral En, Tipo de Edificación.
+    b. Condición de Error:
+    c. Si el lote físico tiene exactamente 1 unidad y NO está registrado como PREDIO INDEPENDIENTE.
+    d.Si el lote físico tiene más de 1 unidad y SÍ está registrado como PREDIO INDEPENDIENTE.
+    e. Excepción/Mensaje: El sistema genera un mensaje de error altamente específico si el "Tipo de Edificación" es CASA/CHALET, para orientar mejor al digitador sobre la naturaleza del inmueble.
   •	UA-1004: Restricción de Casa Habitación en Edificios
     o	Campos Evaluados: Clasificación Del Predio, Predio Catastral En.
     o	Condición de Error: La "Clasificación Del Predio" es CASA HABITACIÓN y simultáneamente está registrado como PREDIO EN EDIFICIO en la columna "Predio Catastral En".
