@@ -67,25 +67,35 @@ def procesar_excel_detalle_muestra(file_bytes, file_name):
     poligono = df_resumen.iloc[4, 30]          # AE5
     pol_sicun = df_resumen.iloc[5, 30]         # AE6
 
-    # Fechas (búsqueda en zona AR:AW)
+    # --- Búsqueda de fechas en toda la hoja ---
     fecha_recepcion = None
     fecha_resultado = None
-    for i in range(df_resumen.shape[0]):
-        for j in range(43, 49):
+    
+    for i in range(df_resumen.shape[0]):          # todas las filas
+        for j in range(df_resumen.shape[1]):      # todas las columnas
             cell_value = str(df_resumen.iloc[i, j]).strip() if pd.notna(df_resumen.iloc[i, j]) else ''
             label = cell_value.replace(' ', '').upper()
+    
+            # Detectar etiqueta de FECHA RECEPCION
             if label in {'FECHARECEPCION:', 'FECHARECEPCION'}:
-                for k in range(49, 53):
+                # Buscar en las 10 celdas siguientes a la derecha un valor no vacío
+                for k in range(j + 1, min(j + 10, df_resumen.shape[1])):
                     val = df_resumen.iloc[i, k]
                     if pd.notna(val) and str(val).strip() != '':
                         fecha_recepcion = val
                         break
+    
+            # Detectar etiqueta de FECHA RESULTADO
             elif label in {'FECHA.RESULTADO:', 'FECHA.RESULTADO'}:
-                for k in range(49, 53):
+                for k in range(j + 1, min(j + 10, df_resumen.shape[1])):
                     val = df_resumen.iloc[i, k]
                     if pd.notna(val) and str(val).strip() != '':
                         fecha_resultado = val
                         break
+    
+            # Si ya tenemos ambas fechas, salimos del bucle exterior
+            if fecha_recepcion is not None and fecha_resultado is not None:
+                break
         if fecha_recepcion is not None and fecha_resultado is not None:
             break
 
