@@ -11,6 +11,7 @@ PERMISOS_POR_PERFIL = {
     1: [
         "Depuración de Datos",
         "Reglas",
+        "Compilar Detalle Errores",
         "Cerrar Sesion"
     ],
 
@@ -18,6 +19,7 @@ PERMISOS_POR_PERFIL = {
     2: [
         "Depuración de Datos",
         "Reglas",
+        "Compilar Detalle Errores",
         "Cerrar Sesion"
     ],
 
@@ -25,6 +27,7 @@ PERMISOS_POR_PERFIL = {
     3: [
         "Depuración de Datos",
         "Reglas",
+        "Compilar Detalle Errores",
         "Cerrar Sesion"
     ],
 
@@ -32,6 +35,7 @@ PERMISOS_POR_PERFIL = {
     4: [
         "Depuración de Datos",
         "Reglas",
+        "Compilar Detalle Errores",
         "Cerrar Sesion"
     ],
 
@@ -39,6 +43,7 @@ PERMISOS_POR_PERFIL = {
     5: [
         "Depuración de Datos",
         "Reglas",
+        "Compilar Detalle Errores",
         "Cerrar Sesion"
     ],
 }
