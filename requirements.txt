@@ -7,3 +7,4 @@ streamlit-folium
 pandas
 openpyxl
 requests
+sqlalchemy
