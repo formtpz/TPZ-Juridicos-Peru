@@ -105,6 +105,10 @@ elif opcion == "Reglas":
 elif opcion == "Compilar Detalle Errores":
     from modulos.procesar_detalle_muestra import render
     render()
+    
+elif opcion == "Resultados Calidad":
+    from modulos.resultados_calidad import render
+    render()
 
 
 # Cargar asignaciones
