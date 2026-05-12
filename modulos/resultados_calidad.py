@@ -220,10 +220,11 @@ def render():
 
     total_graves = len(df_filtrado[df_filtrado['condicion'] == 'grave'])
     total_leves = len(df_filtrado[df_filtrado['condicion'] == 'leve'])
+    total_rechazados= total_registros_bd - total_aprobados
     total_noindica = len(df_filtrado[df_filtrado['condicion'] == 'noindica'])
     total_general = len(df_filtrado)
 
-    col1, col2, col3, col4, col5, col6 = st.columns(6)
+    col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
 
     with col1:
         st.metric("🔴 Graves", total_graves)
@@ -236,6 +237,8 @@ def render():
     with col5:
         st.metric("✅ Aprobados", total_aprobados)
     with col6:
+        st.metric("🚨 Rechazados", total_rechazados)
+    with col7:
         st.metric("📦 Registros BD", total_registros_bd)
 
     if df_filtrado.empty:
