@@ -4,12 +4,12 @@ import pandas as pd
 import re
 from io import BytesIO
 from permisos import validar_acceso
-from db import get_connection  # ← Usamos get_connection directamente
+from db import execute
 import traceback
 
 
 # ============================================================
-# Funciones de procesamiento (se mantienen igual)
+# Funciones de procesamiento
 # ============================================================
 
 def renombrar_leves_graves(df):
@@ -52,10 +52,6 @@ def depurar_dataframe_exportado(df):
 
 
 def normalizar_nombres_columnas(df):
-    """
-    Convierte nombres de columnas a minúsculas,
-    reemplaza espacios, puntos y dos puntos por guiones bajos.
-    """
     df = df.copy()
     df.columns = [
         str(col).lower()
@@ -70,23 +66,17 @@ def normalizar_nombres_columnas(df):
 
 
 def procesar_excel_detalle_muestra(file_bytes, file_name):
-    """
-    Procesa un archivo Excel a partir de sus bytes.
-    Devuelve un DataFrame con los datos extraídos, o vacío si falla.
-    """
     try:
         df_resumen = pd.read_excel(file_bytes, sheet_name='Resumen Muestra', header=None)
     except ValueError:
         st.warning(f"El archivo {file_name} no tiene la hoja 'Resumen Muestra'. Se omite.")
         return pd.DataFrame()
 
-    # Metadatos
     distrito = df_resumen.iloc[5, 14]
     entregable = df_resumen.iloc[6, 14]
     poligono = df_resumen.iloc[4, 30]
     pol_sicun = df_resumen.iloc[5, 30]
 
-    # Búsqueda de fechas
     fecha_recepcion = None
     fecha_resultado = None
     
@@ -114,7 +104,6 @@ def procesar_excel_detalle_muestra(file_bytes, file_name):
         if fecha_recepcion is not None and fecha_resultado is not None:
             break
 
-    # Leer hoja 'Detalle Muestra'
     xls = pd.ExcelFile(file_bytes)
     sheet_detalle = next((s for s in xls.sheet_names if s.lower().strip() == 'detalle muestra'), None)
     if sheet_detalle is None:
@@ -204,16 +193,10 @@ def procesar_excel_detalle_muestra(file_bytes, file_name):
 
 
 # ============================================================
-# Función MEJORADA para guardar en PostgreSQL
+# Función para guardar en PostgreSQL
 # ============================================================
 
 def guardar_en_bd(df_consolidado):
-    """
-    Inserta el DataFrame consolidado en public.calidad_externa.
-    Versión mejorada con mejor manejo de errores y debug.
-    """
-    
-    # Lista completa de columnas de la tabla
     columnas_bd = [
         'distrito', 'entregable', 'poligono', 'pol_sicun',
         'fecha_recepcion', 'fecha_resultado', 'unidad_administrativa', 'crc',
@@ -247,75 +230,46 @@ def guardar_en_bd(df_consolidado):
     ]
     
     try:
-        # 1. Verificar columnas coincidentes
         columnas_existentes = [col for col in columnas_bd if col in df_consolidado.columns]
         
         if not columnas_existentes:
-            st.error("❌ No hay columnas coincidentes. Columnas en el DataFrame:")
-            st.write(list(df_consolidado.columns[:10]))  # Mostrar primeras 10
-            return False
+            st.error("❌ No hay columnas coincidentes")
+            st.write("Columnas en el DataFrame:", list(df_consolidado.columns[:10]))
+            return
         
-        st.info(f"📊 Se insertarán {len(columnas_existentes)} columnas de {len(df_consolidado)} registros")
-        
-        # 2. Obtener conexión
-        conn = get_connection()
-        cur = conn.cursor()
-        
+        # Usar execute del db.py
         registros_insertados = 0
         
-        # 3. Insertar fila por fila con manejo de errores individual
-        for idx, (_, row) in enumerate(df_consolidado.iterrows()):
-            try:
-                valores = []
-                for col in columnas_existentes:
-                    val = row[col]
-                    if pd.notna(val):
-                        val_str = str(val)[:30]
-                    else:
-                        val_str = None
-                    valores.append(val_str)
-                
-                columnas_str = ', '.join(columnas_existentes)
-                placeholders = ', '.join(['%s'] * len(columnas_existentes))
-                
-                query = f"""
-                    INSERT INTO public.calidad_externa ({columnas_str})
-                    VALUES ({placeholders})
-                """
-                
-                cur.execute(query, valores)
-                registros_insertados += 1
-                
-            except Exception as row_error:
-                st.warning(f"⚠️ Error en fila {idx}: {str(row_error)[:100]}")
-                continue
+        for _, row in df_consolidado.iterrows():
+            valores = []
+            for col in columnas_existentes:
+                val = row[col]
+                if pd.notna(val):
+                    val_str = str(val)[:30]
+                else:
+                    val_str = None
+                valores.append(val_str)
+            
+            columnas_str = ', '.join(columnas_existentes)
+            placeholders = ', '.join(['%s'] * len(columnas_existentes))
+            
+            query = f"""
+                INSERT INTO public.calidad_externa ({columnas_str})
+                VALUES ({placeholders})
+            """
+            
+            execute(query, params=valores)
+            registros_insertados += 1
         
-        # 4. Commit final
-        conn.commit()
-        cur.close()
-        
-        if registros_insertados > 0:
-            st.success(f"✅ {registros_insertados} registros insertados exitosamente")
-            return True
-        else:
-            st.error("❌ No se pudo insertar ningún registro")
-            return False
+        st.success(f"✅ {registros_insertados} registros insertados exitosamente")
     
     except Exception as e:
-        st.error(f"❌ Error de conexión: {str(e)}")
+        st.error(f"❌ Error: {str(e)}")
         st.code(traceback.format_exc())
-        
-        # Intentar hacer rollback si hay conexión activa
-        try:
-            conn.rollback()
-        except:
-            pass
-        
-        return False
 
 
 # ============================================================
-# Interfaz de Streamlit
+# Interfaz de Streamlit (CORREGIDA)
 # ============================================================
 
 def render():
@@ -327,6 +281,18 @@ def render():
     Se extraen metadatos y errores por CRC.
     """)
 
+    # ============================================================
+    # INICIALIZAR ESTADOS DE SESIÓN
+    # ============================================================
+    if 'df_consolidado' not in st.session_state:
+        st.session_state['df_consolidado'] = None
+    
+    if 'procesado' not in st.session_state:
+        st.session_state['procesado'] = False
+
+    # ============================================================
+    # FILE UPLOADER (siempre visible)
+    # ============================================================
     archivos = st.file_uploader(
         "📂 Cargar archivos Excel",
         type=["xlsx", "xls"],
@@ -337,6 +303,9 @@ def render():
     if archivos:
         st.info(f"📌 {len(archivos)} archivo(s) cargado(s)")
 
+        # ============================================================
+        # BOTÓN PROCESAR (siempre visible mientras haya archivos)
+        # ============================================================
         if st.button("🚀 Procesar archivos", type="primary"):
             with st.spinner("Procesando..."):
                 frames = []
@@ -349,45 +318,51 @@ def render():
                     progress_bar.progress((idx + 1) / len(archivos))
 
                 if frames:
-                    df_consolidado = pd.concat(frames, ignore_index=True)
-                    st.session_state['df_consolidado'] = df_consolidado
-
-                    st.success(f"✅ {len(df_consolidado)} registros consolidados.")
-
-                    with st.expander("🔍 Vista previa (50 filas)"):
-                        st.dataframe(df_consolidado.head(50), use_container_width=True)
-                    
-                    with st.expander("🔍 Columnas del DataFrame"):
-                        st.write(list(df_consolidado.columns))
-
-                    # Exportar a Excel
-                    output = BytesIO()
-                    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                        df_consolidado.to_excel(writer, index=False, sheet_name='Detalle Errores')
-                    output.seek(0)
-
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        st.download_button(
-                            label="⬇️ Descargar Excel",
-                            data=output,
-                            file_name="Compilado_Detalle_errores.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            use_container_width=True
-                        )
-                    
-                    with col2:
-                        # Usar un key único para evitar que desaparezca
-                        if st.button("💾 Guardar en BD", key="btn_guardar_bd", type="secondary", use_container_width=True):
-                            with st.spinner("Guardando en la base de datos..."):
-                                # Volver a obtener el DataFrame del session_state
-                                df_to_save = st.session_state.get('df_consolidado')
-                                if df_to_save is not None:
-                                    guardar_en_bd(df_to_save)
-                                else:
-                                    st.error("❌ No hay datos para guardar. Procesa los archivos primero.")
+                    st.session_state['df_consolidado'] = pd.concat(frames, ignore_index=True)
+                    st.session_state['procesado'] = True
+                    st.rerun()  # Forzar rerun para mostrar los resultados
                 else:
                     st.error("❌ Ningún archivo contenía datos válidos.")
-    else:
+                    st.session_state['procesado'] = False
+
+    # ============================================================
+    # MOSTRAR RESULTADOS SI YA SE PROCESÓ
+    # ============================================================
+    if st.session_state['procesado'] and st.session_state['df_consolidado'] is not None:
+        df_consolidado = st.session_state['df_consolidado']
+        
+        st.success(f"✅ {len(df_consolidado)} registros consolidados.")
+
+        with st.expander("🔍 Vista previa (50 filas)"):
+            st.dataframe(df_consolidado.head(50), use_container_width=True)
+        
+        with st.expander("🔍 Columnas del DataFrame"):
+            st.write(list(df_consolidado.columns))
+
+        # Exportar a Excel
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df_consolidado.to_excel(writer, index=False, sheet_name='Detalle Errores')
+        output.seek(0)
+
+        # ============================================================
+        # BOTONES SIEMPRE VISIBLES (DESPUÉS DE PROCESAR)
+        # ============================================================
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.download_button(
+                label="⬇️ Descargar Excel",
+                data=output,
+                file_name="Compilado_Detalle_errores.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+        
+        with col2:
+            if st.button("💾 Guardar en Base de Datos", type="secondary", use_container_width=True):
+                with st.spinner("Guardando en la base de datos..."):
+                    guardar_en_bd(df_consolidado)
+
+    elif not archivos:
         st.info("📂 Arrastra o selecciona archivos Excel para comenzar.")
