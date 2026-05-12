@@ -4,6 +4,7 @@ import pandas as pd
 import re
 from io import BytesIO
 from permisos import validar_acceso
+from db_core import execute  # Mismo método que usa CC_Precampo.py
 
 
 # ============================================================
@@ -49,6 +50,25 @@ def depurar_dataframe_exportado(df):
     return df
 
 
+def normalizar_nombres_columnas(df):
+    """
+    Convierte todos los nombres de columnas a minúsculas,
+    reemplaza espacios, puntos y dos puntos por guiones bajos.
+    Ejemplo: 'FI.02.01' -> 'fi_02_01', 'FECHA RECEPCION:' -> 'fecha_recepcion'
+    """
+    df = df.copy()
+    df.columns = [
+        str(col).lower()
+        .replace(' ', '_')
+        .replace('.', '_')
+        .replace('-', '_')
+        .replace(':', '')
+        .strip('_')
+        for col in df.columns
+    ]
+    return df
+
+
 def procesar_excel_detalle_muestra(file_bytes, file_name):
     """
     Procesa un archivo Excel a partir de sus bytes (Streamlit UploadedFile).
@@ -71,21 +91,18 @@ def procesar_excel_detalle_muestra(file_bytes, file_name):
     fecha_recepcion = None
     fecha_resultado = None
     
-    for i in range(df_resumen.shape[0]):          # todas las filas
-        for j in range(df_resumen.shape[1]):      # todas las columnas
+    for i in range(df_resumen.shape[0]):
+        for j in range(df_resumen.shape[1]):
             cell_value = str(df_resumen.iloc[i, j]).strip() if pd.notna(df_resumen.iloc[i, j]) else ''
             label = cell_value.replace(' ', '').upper()
     
-            # Detectar etiqueta de FECHA RECEPCION
             if label in {'FECHARECEPCION:', 'FECHARECEPCION'}:
-                # Buscar en las 10 celdas siguientes a la derecha un valor no vacío
                 for k in range(j + 1, min(j + 10, df_resumen.shape[1])):
                     val = df_resumen.iloc[i, k]
                     if pd.notna(val) and str(val).strip() != '':
                         fecha_recepcion = val
                         break
     
-            # Detectar etiqueta de FECHA RESULTADO
             elif label in {'FECHA.RESULTADO:', 'FECHA.RESULTADO'}:
                 for k in range(j + 1, min(j + 10, df_resumen.shape[1])):
                     val = df_resumen.iloc[i, k]
@@ -93,7 +110,6 @@ def procesar_excel_detalle_muestra(file_bytes, file_name):
                         fecha_resultado = val
                         break
     
-            # Si ya tenemos ambas fechas, salimos del bucle exterior
             if fecha_recepcion is not None and fecha_resultado is not None:
                 break
         if fecha_recepcion is not None and fecha_resultado is not None:
@@ -109,7 +125,6 @@ def procesar_excel_detalle_muestra(file_bytes, file_name):
     df_detalle = pd.read_excel(file_bytes, sheet_name=sheet_detalle, header=None)
     df_data = df_detalle.iloc[7:, :].reset_index(drop=True)
 
-    # Columnas de Unidad Administrativa y CRC
     header_row = df_detalle.iloc[6]
     unidad_col = next(
         (col for col, val in header_row.items()
@@ -125,7 +140,6 @@ def procesar_excel_detalle_muestra(file_bytes, file_name):
     unidad_administrativa = df_data.iloc[:, unidad_col].apply(lambda x: str(x).strip() if pd.notna(x) else '')
     crc = df_data.iloc[:, crc_col].apply(lambda x: str(x).strip() if pd.notna(x) else '')
 
-    # Columnas de errores (a partir del primer código tipo XX.XX.XX)
     first_error_col = next(
         (col for col, val in header_row.items()
          if isinstance(val, str) and re.match(r'^[A-Z]{2}\.\d{2}\.\d{2}$', val.strip())),
@@ -160,7 +174,6 @@ def procesar_excel_detalle_muestra(file_bytes, file_name):
     df_errors = df_data.iloc[:, error_columns].copy()
     df_errors.columns = column_names
 
-    # Construir DataFrame final
     df_final = pd.concat(
         [
             pd.Series([distrito] * len(df_errors), name='DISTRITO'),
@@ -176,7 +189,6 @@ def procesar_excel_detalle_muestra(file_bytes, file_name):
         axis=1,
     )
 
-    # Filtrar filas válidas
     valid_rows = (
         df_final['Unidad Administrativa'].astype(str).str.strip() != ''
     ) | (df_final['CRC'].astype(str).str.strip() != '')
@@ -187,7 +199,88 @@ def procesar_excel_detalle_muestra(file_bytes, file_name):
     df_final['CRC'] = df_final['CRC'].astype(str)
 
     df_final = depurar_dataframe_exportado(df_final)
+    df_final = normalizar_nombres_columnas(df_final)
+    
     return df_final
+
+
+# ============================================================
+# Función para guardar en PostgreSQL
+# ============================================================
+
+def guardar_en_bd(df_consolidado):
+    """
+    Inserta el DataFrame consolidado en la tabla public.calidad_externa.
+    Solo inserta las columnas que existen en la tabla.
+    """
+    try:
+        # Columnas exactas de la tabla calidad_externa
+        columnas_bd = [
+            'distrito', 'entregable', 'poligono', 'pol_sicun',
+            'fecha_recepcion', 'fecha_resultado', 'unidad_administrativa', 'crc',
+            'fi_02_01', 'fi_02_02', 'fi_02_03', 'fi_02_04',
+            'fi_03_01', 'fi_04_01', 'fi_05_01', 'fi_05_02', 'fi_05_03',
+            'fi_05_04', 'fi_05_05', 'fi_05_06', 'fi_06_01', 'fi_06_02',
+            'fi_06_03', 'fi_06_04', 'fi_06_05', 'fi_06_06', 'fi_07_01',
+            'fi_07_02', 'fi_08_01', 'fi_08_02', 'fi_08_03', 'fi_08_04',
+            'fi_08_05', 'fi_08_06', 'fi_08_07', 'fi_08_08', 'fi_09_01',
+            'fi_09_02', 'fi_10_01', 'fi_10_02', 'fi_10_03', 'fi_10_04',
+            'fi_11_01', 'fi_11_02', 'fi_11_03', 'fi_12_01', 'fi_12_02',
+            'fi_12_03', 'fi_12_04', 'fi_13_01', 'fi_13_02', 'fi_13_03',
+            'fi_13_04', 'fi_14_01', 'fi_14_02', 'fi_14_03', 'fi_14_04',
+            'fi_15_01', 'fi_15_02', 'fi_15_03', 'fi_16_01', 'fi_16_02',
+            'fi_17_01', 'fi_17_02', 'fi_17_03', 'fi_18_01', 'fi_18_02',
+            'fi_18_03', 'fi_19_01', 'fi_19_02', 'fi_20_01', 'fi_20_02',
+            'fi_20_03', 'fi_21_01', 'fi_21_02', 'fi_21_03', 'fi_22_01',
+            'fi_23_01', 'fi_23_02', 'fi_24_01', 'fi_24_02', 'fi_24_03',
+            'fi_25_01', 'fi_25_02', 'fi_25_03', 'fi_25_04', 'fi_25_05',
+            'fi_25_06', 'fi_26_01', 'fi_26_02', 'fi_27_01', 'fi_27_02',
+            'fi_28_01', 'fi_28_02', 'fi_29_01', 'fi_29_02', 'fi_29_03',
+            'fi_29_04', 'fi_29_05', 'fi_29_06', 'fi_29_07', 'fi_29_08',
+            'fi_29_09', 'fi_30_01', 'fi_30_02', 'fi_30_03', 'fi_30_04',
+            'fi_30_05', 'fi_30_06', 'fi_30_07', 'fi_30_08', 'fi_30_09',
+            'fi_31_01', 'fi_31_02', 'fi_32_01', 'fi_32_02', 'fi_32_03',
+            'fi_33_01', 'fi_33_02', 'fi_34_01', 'fi_34_02', 'fi_34_03',
+            'fi_34_04', 'fi_35_01', 'fi_35_02', 'fi_35_03', 'fi_35_04',
+            'fi_35_05', 'fi_35_06', 'fi_36_01', 'fi_36_02', 'fi_36_03',
+            'fi_37_01', 'fi_37_02', 'fi_37_03', 'fi_37_04', 'fi_37_05',
+            'fi_37_06', 'fi_38_01', 'fi_39_01'
+        ]
+        
+        # Filtrar solo columnas que existen en el DataFrame
+        columnas_existentes = [col for col in columnas_bd if col in df_consolidado.columns]
+        
+        if not columnas_existentes:
+            return False, "❌ No hay columnas coincidentes entre el Excel y la tabla de BD."
+        
+        registros_insertados = 0
+        
+        # Insertar fila por fila
+        for _, row in df_consolidado.iterrows():
+            valores = []
+            for col in columnas_existentes:
+                val = row[col]
+                if pd.notna(val):
+                    val_str = str(val)[:30]  # Truncar a VARCHAR(30)
+                else:
+                    val_str = None
+                valores.append(val_str)
+            
+            columnas_str = ', '.join(columnas_existentes)
+            placeholders = ', '.join(['%s'] * len(columnas_existentes))
+            
+            query = f"""
+                INSERT INTO public.calidad_externa ({columnas_str})
+                VALUES ({placeholders})
+            """
+            
+            execute(query, params=valores)
+            registros_insertados += 1
+        
+        return True, f"✅ {registros_insertados} registros insertados en calidad_externa."
+    
+    except Exception as e:
+        return False, f"❌ Error al guardar: {str(e)}"
 
 
 # ============================================================
@@ -195,12 +288,12 @@ def procesar_excel_detalle_muestra(file_bytes, file_name):
 # ============================================================
 
 def render():
-    validar_acceso("Compilar Detalle Errores")   # <-- Nombre que pondremos en permisos
+    validar_acceso("Compilar Detalle Errores")
 
     st.title("📋 Compilador de Detalle de Errores")
     st.markdown("""
-    Sube los archivos Excel que contengan las hojas **'Resumen Muestra'** y **'Detalle Muestra'**.  
-    Se extraerán los metadatos y los errores individuales por CRC, generando un único archivo consolidado.
+    Sube los archivos Excel con hojas **'Resumen Muestra'** y **'Detalle Muestra'**.  
+    Se extraen metadatos y errores por CRC, generando un archivo consolidado.
     """)
 
     archivos = st.file_uploader(
@@ -214,40 +307,50 @@ def render():
         st.info(f"📌 {len(archivos)} archivo(s) cargado(s)")
 
         if st.button("🚀 Procesar archivos", type="primary"):
-            with st.spinner("Procesando, por favor espera..."):
+            with st.spinner("Procesando..."):
                 frames = []
                 progress_bar = st.progress(0)
                 for idx, uploaded_file in enumerate(archivos):
-                    # Leer bytes del archivo subido
                     file_bytes = BytesIO(uploaded_file.read())
                     df = procesar_excel_detalle_muestra(file_bytes, uploaded_file.name)
                     if not df.empty:
                         frames.append(df)
-                    # Actualizar barra
                     progress_bar.progress((idx + 1) / len(archivos))
 
                 if frames:
                     df_consolidado = pd.concat(frames, ignore_index=True)
+                    st.session_state['df_consolidado'] = df_consolidado
 
-                    st.success(f"✅ Procesamiento completado. Se consolidaron {len(df_consolidado)} registros.")
+                    st.success(f"✅ {len(df_consolidado)} registros consolidados.")
 
-                    # Mostrar vista previa
-                    with st.expander("🔍 Vista previa del resultado"):
+                    with st.expander("🔍 Vista previa (50 filas)"):
                         st.dataframe(df_consolidado.head(50), use_container_width=True)
 
-                    # Convertir a Excel para descarga
                     output = BytesIO()
                     with pd.ExcelWriter(output, engine='openpyxl') as writer:
                         df_consolidado.to_excel(writer, index=False, sheet_name='Detalle Errores')
                     output.seek(0)
 
-                    st.download_button(
-                        label="⬇️ Descargar Excel consolidado",
-                        data=output,
-                        file_name="Compilado_Detalle_errores.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                    )
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.download_button(
+                            label="⬇️ Descargar Excel",
+                            data=output,
+                            file_name="Compilado_Detalle_errores.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            use_container_width=True
+                        )
+                    
+                    with col2:
+                        if st.button("💾 Guardar en BD", type="secondary", use_container_width=True):
+                            with st.spinner("Guardando..."):
+                                exito, mensaje = guardar_en_bd(df_consolidado)
+                                if exito:
+                                    st.success(mensaje)
+                                else:
+                                    st.error(mensaje)
                 else:
-                    st.error("❌ Ninguno de los archivos contenía datos válidos.")
+                    st.error("❌ Ningún archivo contenía datos válidos.")
     else:
-        st.info("📂 Arrastra o selecciona los archivos Excel para comenzar.")
+        st.info("📂 Arrastra o selecciona archivos Excel para comenzar.")
