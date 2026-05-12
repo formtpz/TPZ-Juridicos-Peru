@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from db import get_connection
+from db import get_engine
 
 
 # ============================================================
@@ -33,15 +34,13 @@ def cargar_descripcion():
 # ============================================================
 # CONSULTAR DATOS DESDE LA BD
 # ============================================================
+
+
 @st.cache_data(ttl=60)
 def cargar_datos_calidad():
-    """
-    Consulta todos los registros de public.calidad_externa.
-    """
-    conn = get_connection()
+    engine = get_engine()
     query = "SELECT * FROM public.calidad_externa"
-    df = pd.read_sql(query, conn)
-    conn.close()
+    df = pd.read_sql(query, engine)
     return df
 
 
