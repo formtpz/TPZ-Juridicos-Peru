@@ -4,11 +4,11 @@ import pandas as pd
 import re
 from io import BytesIO
 from permisos import validar_acceso
-from db import execute  # Mismo método que usa CC_Precampo.py
+from db import execute  # ← Importamos de db.py (ya modificado)
 
 
 # ============================================================
-# Funciones de procesamiento (adaptadas del script original)
+# Funciones de procesamiento
 # ============================================================
 
 def renombrar_leves_graves(df):
@@ -52,7 +52,7 @@ def depurar_dataframe_exportado(df):
 
 def normalizar_nombres_columnas(df):
     """
-    Convierte todos los nombres de columnas a minúsculas,
+    Convierte nombres de columnas a minúsculas,
     reemplaza espacios, puntos y dos puntos por guiones bajos.
     Ejemplo: 'FI.02.01' -> 'fi_02_01', 'FECHA RECEPCION:' -> 'fecha_recepcion'
     """
@@ -71,23 +71,22 @@ def normalizar_nombres_columnas(df):
 
 def procesar_excel_detalle_muestra(file_bytes, file_name):
     """
-    Procesa un archivo Excel a partir de sus bytes (Streamlit UploadedFile).
-    Devuelve un DataFrame con los datos extraídos, o DataFrame vacío si falla.
+    Procesa un archivo Excel a partir de sus bytes.
+    Devuelve un DataFrame con los datos extraídos, o vacío si falla.
     """
     try:
-        # Leer hoja 'Resumen Muestra'
         df_resumen = pd.read_excel(file_bytes, sheet_name='Resumen Muestra', header=None)
     except ValueError:
         st.warning(f"El archivo {file_name} no tiene la hoja 'Resumen Muestra'. Se omite.")
         return pd.DataFrame()
 
     # Metadatos
-    distrito = df_resumen.iloc[5, 14]          # O6
-    entregable = df_resumen.iloc[6, 14]        # O7
-    poligono = df_resumen.iloc[4, 30]          # AE5
-    pol_sicun = df_resumen.iloc[5, 30]         # AE6
+    distrito = df_resumen.iloc[5, 14]
+    entregable = df_resumen.iloc[6, 14]
+    poligono = df_resumen.iloc[4, 30]
+    pol_sicun = df_resumen.iloc[5, 30]
 
-    # --- Búsqueda de fechas en toda la hoja ---
+    # Búsqueda de fechas
     fecha_recepcion = None
     fecha_resultado = None
     
@@ -210,11 +209,11 @@ def procesar_excel_detalle_muestra(file_bytes, file_name):
 
 def guardar_en_bd(df_consolidado):
     """
-    Inserta el DataFrame consolidado en la tabla public.calidad_externa.
+    Inserta el DataFrame consolidado en public.calidad_externa.
     Solo inserta las columnas que existen en la tabla.
     """
     try:
-        # Columnas exactas de la tabla calidad_externa
+        # Columnas de la tabla calidad_externa
         columnas_bd = [
             'distrito', 'entregable', 'poligono', 'pol_sicun',
             'fecha_recepcion', 'fecha_resultado', 'unidad_administrativa', 'crc',
@@ -247,21 +246,20 @@ def guardar_en_bd(df_consolidado):
             'fi_37_06', 'fi_38_01', 'fi_39_01'
         ]
         
-        # Filtrar solo columnas que existen en el DataFrame
+        # Filtrar columnas que existen en el DataFrame
         columnas_existentes = [col for col in columnas_bd if col in df_consolidado.columns]
         
         if not columnas_existentes:
-            return False, "❌ No hay columnas coincidentes entre el Excel y la tabla de BD."
+            return False, "❌ No hay columnas coincidentes entre el Excel y la tabla."
         
         registros_insertados = 0
         
-        # Insertar fila por fila
         for _, row in df_consolidado.iterrows():
             valores = []
             for col in columnas_existentes:
                 val = row[col]
                 if pd.notna(val):
-                    val_str = str(val)[:30]  # Truncar a VARCHAR(30)
+                    val_str = str(val)[:30]
                 else:
                     val_str = None
                 valores.append(val_str)
@@ -288,12 +286,12 @@ def guardar_en_bd(df_consolidado):
 # ============================================================
 
 def render():
-    validar_acceso("Compilar Detalle Errores")
+    validar_acceso("Depuración de Datos")  # ← Debe coincidir con PERMISOS_POR_PERFIL
 
     st.title("📋 Compilador de Detalle de Errores")
     st.markdown("""
     Sube los archivos Excel con hojas **'Resumen Muestra'** y **'Detalle Muestra'**.  
-    Se extraen metadatos y errores por CRC, generando un archivo consolidado.
+    Se extraen metadatos y errores por CRC.
     """)
 
     archivos = st.file_uploader(
