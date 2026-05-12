@@ -52,6 +52,13 @@ def depurar_dataframe_exportado(df):
 
 
 def normalizar_nombres_columnas(df):
+    """
+    Convierte nombres de columnas a minúsculas,
+    reemplaza espacios, puntos y dos puntos por guiones bajos,
+    y elimina guiones bajos múltiples.
+    """
+    import re  # ← Agregar al inicio del archivo si no está
+    
     df = df.copy()
     df.columns = [
         str(col).lower()
@@ -62,8 +69,14 @@ def normalizar_nombres_columnas(df):
         .strip('_')
         for col in df.columns
     ]
+    
+    # Limpiar guiones bajos múltiples (ej: fecha__resultado → fecha_resultado)
+    df.columns = [
+        re.sub(r'_+', '_', col)  # Reemplaza 1 o más '_' por uno solo
+        for col in df.columns
+    ]
+    
     return df
-
 
 def procesar_excel_detalle_muestra(file_bytes, file_name):
     try:
