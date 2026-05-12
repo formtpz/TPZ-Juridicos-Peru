@@ -71,7 +71,9 @@ def transformar_a_errores(df_calidad, df_desc):
     for _, row in df_calidad.iterrows():
         for col in columnas_error:
             valor = row[col]
-            if pd.notna(valor) and str(valor).strip() != '':
+            # Solo contar si NO es vacío, NO es null, y NO es cero (ni "0", " 0 ", "0.0", etc.)
+            valor_str = str(valor).strip()
+            if pd.notna(valor) and valor_str != '' and valor_str not in ['0', '0.0', '-', 'N/A', 'NA', 'null', 'None']:
                 codigo = col.upper()
                 condicion = mapa.get(col.lower(), (None, None))[0] or 'desconocido'
                 modulo = mapa.get(col.lower(), (None, None))[1] or 'desconocido'
