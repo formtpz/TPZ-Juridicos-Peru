@@ -12,7 +12,9 @@ PERMISOS_POR_PERFIL = {
         "Depuración de Datos",
         "Reglas",
         "Compilar Detalle Errores",
-        "Cerrar Sesion"
+        "Resultados Calidad",
+        "Cerrar Sesion",
+   
     ],
 
     # 2 = RRHH
@@ -20,7 +22,9 @@ PERMISOS_POR_PERFIL = {
         "Depuración de Datos",
         "Reglas",
         "Compilar Detalle Errores",
-        "Cerrar Sesion"
+        "Resultados Calidad",
+        "Cerrar Sesion",
+
     ],
 
     # 3 = Operador
@@ -28,6 +32,7 @@ PERMISOS_POR_PERFIL = {
         "Depuración de Datos",
         "Reglas",
         "Compilar Detalle Errores",
+        "Resultados Calidad",
         "Cerrar Sesion"
     ],
 
@@ -36,6 +41,7 @@ PERMISOS_POR_PERFIL = {
         "Depuración de Datos",
         "Reglas",
         "Compilar Detalle Errores",
+        "Resultados Calidad",
         "Cerrar Sesion"
     ],
 
@@ -44,6 +50,7 @@ PERMISOS_POR_PERFIL = {
         "Depuración de Datos",
         "Reglas",
         "Compilar Detalle Errores",
+        "Resultados Calidad",
         "Cerrar Sesion"
     ],
 }
