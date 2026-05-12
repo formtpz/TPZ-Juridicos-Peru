@@ -4,7 +4,7 @@ import pandas as pd
 import re
 from io import BytesIO
 from permisos import validar_acceso
-from db_core import execute  # Mismo método que usa CC_Precampo.py
+from db import execute  # Mismo método que usa CC_Precampo.py
 
 
 # ============================================================
