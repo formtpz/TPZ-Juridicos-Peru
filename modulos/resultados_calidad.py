@@ -67,24 +67,31 @@ def es_error_real(valor):
 # PROCESAR DATOS
 # ============================================================
 def transformar_a_errores(df_calidad, df_desc):
+    """
+    Convierte el DataFrame ancho a formato largo,
+    usando SOLO las columnas de error listadas en Descripcion.csv
+    """
+    # Columnas de metadatos para mantener en el resultado
     columnas_meta = [
         'distrito', 'entregable', 'poligono', 'pol_sicun',
         'fecha_recepcion', 'fecha_resultado', 'unidad_administrativa', 'crc'
     ]
-    columnas_no_errores = ['suma_de_errores_por_fila', 'otras', 'error']
     
-    columnas_error = [
-        c for c in df_calidad.columns
-        if c not in columnas_meta and c not in columnas_no_errores
-    ]
-
+    # Usar SOLO los códigos del CSV como columnas de error válidas
+    # El CSV tiene los códigos en MAYÚSCULAS (FI_02_01), pero la BD en minúsculas (fi_02_01)
+    codigos_csv = df_desc['error'].str.lower().tolist()
+    
+    # De esas, solo tomar las que existen en la BD
+    columnas_error = [c for c in codigos_csv if c in df_calidad.columns]
+    
+    # Mapa error -> (condicion, modulo)
     mapa = dict(zip(
         df_desc['error'].str.lower(),
         zip(df_desc['condicion'], df_desc['modulo'])
     ))
 
     registros = []
-    filas_con_error = set()  # Para contar aprobados después
+    filas_con_error = set()
 
     for idx, row in df_calidad.iterrows():
         fila_tiene_error = False
@@ -113,9 +120,7 @@ def transformar_a_errores(df_calidad, df_desc):
 
     df_largo = pd.DataFrame(registros)
     
-    # Total de registros (filas) en la BD
     total_registros = len(df_calidad)
-    # Registros SIN ningún error
     aprobados = total_registros - len(filas_con_error)
     
     return df_largo, total_registros, aprobados
