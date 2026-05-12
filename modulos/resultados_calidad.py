@@ -1,27 +1,21 @@
+# modulos/resultados_calidad.py
 import streamlit as st
 import pandas as pd
-from db import get_connection
 from db import get_engine
 
 
 # ============================================================
-# CARGAR DESCRIPCIÓN DE ERRORES (DESDE CSV EN REPO)
+# CARGAR DESCRIPCIÓN DE ERRORES
 # ============================================================
 @st.cache_data
 def cargar_descripcion():
-    """
-    Carga el archivo Descripcion.csv desde el repositorio GitHub.
-    Columnas: error, condicion, modulo
-    """
     url = (
         "https://raw.githubusercontent.com/formtpz/TPZ-Juridicos-Peru"
         "/main/Reglas/Descripcion.csv"
     )
     try:
         df = pd.read_csv(url, sep=';')
-        # Normalizar nombres de columnas
         df.columns = [c.strip().lower() for c in df.columns]
-        # Normalizar valores
         df['error'] = df['error'].str.strip().str.upper()
         df['condicion'] = df['condicion'].str.strip().str.lower()
         df['modulo'] = df['modulo'].str.strip().str.lower()
@@ -32,10 +26,8 @@ def cargar_descripcion():
 
 
 # ============================================================
-# CONSULTAR DATOS DESDE LA BD
+# CARGAR DATOS DESDE BD
 # ============================================================
-
-
 @st.cache_data(ttl=60)
 def cargar_datos_calidad():
     engine = get_engine()
@@ -45,43 +37,66 @@ def cargar_datos_calidad():
 
 
 # ============================================================
-# PROCESAR DATOS: TRANSFORMAR A FORMATO LARGO (FILA POR ERROR)
+# FUNCIÓN AUXILIAR: ¿Es un valor de error real?
+# ============================================================
+def es_error_real(valor):
+    """
+    Determina si un valor cuenta como error.
+    No cuenta si es: NaN, vacío, '0', '0.0', espacios, '-', 'N/A', 'NA', 'null', 'None'
+    """
+    if pd.isna(valor):
+        return False
+    valor_str = str(valor).strip()
+    if valor_str == '':
+        return False
+    # Valores que NO son errores
+    no_errores = ['0', '0.0', '-', 'N/A', 'NA', 'NULL', 'NONE', '0,0']
+    if valor_str.upper() in no_errores:
+        return False
+    # Intentar convertir a float: si es 0.0, ignorar
+    try:
+        if float(valor_str.replace(',', '.')) == 0:
+            return False
+    except ValueError:
+        pass
+    # Es un error real
+    return True
+
+
+# ============================================================
+# PROCESAR DATOS
 # ============================================================
 def transformar_a_errores(df_calidad, df_desc):
-    """
-    Convierte el DataFrame ancho (una columna por código de error)
-    a un formato largo con columnas: [codigo_completo, valor, condicion, modulo, codigo_principal].
-    Solo filas donde el valor NO sea nulo/vacío.
-    """
-    # Columnas de error en la BD (excluyendo metadatos)
     columnas_meta = [
         'distrito', 'entregable', 'poligono', 'pol_sicun',
         'fecha_recepcion', 'fecha_resultado', 'unidad_administrativa', 'crc'
     ]
-    columnas_error = [c for c in df_calidad.columns if c not in columnas_meta]
+    columnas_no_errores = ['suma_de_errores_por_fila', 'otras', 'error']
+    
+    columnas_error = [
+        c for c in df_calidad.columns
+        if c not in columnas_meta and c not in columnas_no_errores
+    ]
 
-    # Diccionario error -> (condicion, modulo)
     mapa = dict(zip(
         df_desc['error'].str.lower(),
         zip(df_desc['condicion'], df_desc['modulo'])
     ))
 
     registros = []
-    for _, row in df_calidad.iterrows():
+    filas_con_error = set()  # Para contar aprobados después
+
+    for idx, row in df_calidad.iterrows():
+        fila_tiene_error = False
         for col in columnas_error:
             valor = row[col]
-            # Solo contar si NO es vacío, NO es null, y NO es cero (ni "0", " 0 ", "0.0", etc.)
-            valor_str = str(valor).strip()
-            if pd.notna(valor) and valor_str != '' and valor_str not in ['0', '0.0', '-', 'N/A', 'NA', 'null', 'None']:
+            if es_error_real(valor):
+                fila_tiene_error = True
                 codigo = col.upper()
                 condicion = mapa.get(col.lower(), (None, None))[0] or 'desconocido'
                 modulo = mapa.get(col.lower(), (None, None))[1] or 'desconocido'
-                # Código principal: tomar los dos primeros bloques (ej: FI_02_01 → FI_02)
                 partes = codigo.split('_')
-                if len(partes) >= 2:
-                    codigo_principal = f"{partes[0]}_{partes[1]}"
-                else:
-                    codigo_principal = codigo
+                codigo_principal = f"{partes[0]}_{partes[1]}" if len(partes) >= 2 else codigo
 
                 registros.append({
                     'distrito': row.get('distrito'),
@@ -93,91 +108,76 @@ def transformar_a_errores(df_calidad, df_desc):
                     'condicion': condicion,
                     'modulo': modulo,
                 })
+        if fila_tiene_error:
+            filas_con_error.add(idx)
 
     df_largo = pd.DataFrame(registros)
-    return df_largo
+    
+    # Total de registros (filas) en la BD
+    total_registros = len(df_calidad)
+    # Registros SIN ningún error
+    aprobados = total_registros - len(filas_con_error)
+    
+    return df_largo, total_registros, aprobados
 
 
 # ============================================================
-# INTERFAZ DE STREAMLIT
+# INTERFAZ STREAMLIT
 # ============================================================
 def render():
-    # Verificar acceso
     from permisos import validar_acceso
     validar_acceso("Depuración de Datos")
 
     st.title("📊 Resultados de Calidad")
-    st.markdown("""
-    Visualiza y analiza los errores de calidad externa.
-    Filtra por distrito, entregable, fechas, módulo o condición.
-    """)
+    st.markdown("Visualiza y analiza los errores de calidad externa.")
 
     # --- Cargar datos ---
-    with st.spinner("Cargando datos desde la base de datos..."):
+    with st.spinner("Cargando datos..."):
         df_calidad = cargar_datos_calidad()
         df_desc = cargar_descripcion()
 
     if df_calidad.empty:
-        st.warning("⚠️ No hay datos en la tabla calidad_externa.")
+        st.warning("⚠️ No hay datos en calidad_externa.")
         return
-
     if df_desc.empty:
-        st.warning("⚠️ No se pudo cargar la descripción de errores.")
+        st.warning("⚠️ No se pudo cargar Descripcion.csv.")
         return
 
-    # --- Transformar a formato largo ---
-    df_errores = transformar_a_errores(df_calidad, df_desc)
-
-    if df_errores.empty:
-        st.info("No se encontraron errores registrados.")
-        return
+    # --- Transformar ---
+    df_errores, total_registros_bd, total_aprobados = transformar_a_errores(df_calidad, df_desc)
 
     # ============================================================
-    # FILTROS
+    # FILTROS EN SIDEBAR
     # ============================================================
     st.sidebar.header("🔍 Filtros")
 
-    # Filtro Distrito
     distritos = sorted(df_errores['distrito'].dropna().unique())
-    filtro_distrito = st.sidebar.multiselect(
-        "Distrito", options=distritos, default=[]
-    )
+    filtro_distrito = st.sidebar.multiselect("Distrito", options=distritos, default=[])
 
-    # Filtro Entregable
     entregables = sorted(df_errores['entregable'].dropna().unique())
-    filtro_entregable = st.sidebar.multiselect(
-        "Entregable", options=entregables, default=[]
-    )
+    filtro_entregable = st.sidebar.multiselect("Entregable", options=entregables, default=[])
 
-    # Filtro Fecha Recepción
     st.sidebar.markdown("---")
     st.sidebar.subheader("Fecha Recepción")
     col1, col2 = st.sidebar.columns(2)
     with col1:
-        fecha_rec_inicio = st.date_input("Inicio", value=None, key="fecha_rec_ini")
+        fecha_rec_inicio = st.date_input("Inicio", value=None, key="rec_ini")
     with col2:
-        fecha_rec_fin = st.date_input("Fin", value=None, key="fecha_rec_fin")
+        fecha_rec_fin = st.date_input("Fin", value=None, key="rec_fin")
 
-    # Filtro Fecha Resultado
     st.sidebar.subheader("Fecha Resultado")
     col3, col4 = st.sidebar.columns(2)
     with col3:
-        fecha_res_inicio = st.date_input("Inicio", value=None, key="fecha_res_ini")
+        fecha_res_inicio = st.date_input("Inicio", value=None, key="res_ini")
     with col4:
-        fecha_res_fin = st.date_input("Fin", value=None, key="fecha_res_fin")
+        fecha_res_fin = st.date_input("Fin", value=None, key="res_fin")
 
-    # Filtro Módulo
     st.sidebar.markdown("---")
     modulos = sorted(df_errores['modulo'].dropna().unique())
-    filtro_modulo = st.sidebar.multiselect(
-        "Módulo", options=modulos, default=[]
-    )
+    filtro_modulo = st.sidebar.multiselect("Módulo", options=modulos, default=[])
 
-    # Filtro Condición
     condiciones = sorted(df_errores['condicion'].dropna().unique())
-    filtro_condicion = st.sidebar.multiselect(
-        "Condición", options=condiciones, default=[]
-    )
+    filtro_condicion = st.sidebar.multiselect("Condición", options=condiciones, default=[])
 
     # --- Aplicar filtros ---
     df_filtrado = df_errores.copy()
@@ -191,7 +191,6 @@ def render():
     if filtro_condicion:
         df_filtrado = df_filtrado[df_filtrado['condicion'].isin(filtro_condicion)]
 
-    # Filtro por fecha de recepción
     if fecha_rec_inicio:
         df_filtrado = df_filtrado[
             pd.to_datetime(df_filtrado['fecha_recepcion'], errors='coerce') >= pd.Timestamp(fecha_rec_inicio)
@@ -200,8 +199,6 @@ def render():
         df_filtrado = df_filtrado[
             pd.to_datetime(df_filtrado['fecha_recepcion'], errors='coerce') <= pd.Timestamp(fecha_rec_fin)
         ]
-
-    # Filtro por fecha de resultado
     if fecha_res_inicio:
         df_filtrado = df_filtrado[
             pd.to_datetime(df_filtrado['fecha_resultado'], errors='coerce') >= pd.Timestamp(fecha_res_inicio)
@@ -211,25 +208,44 @@ def render():
             pd.to_datetime(df_filtrado['fecha_resultado'], errors='coerce') <= pd.Timestamp(fecha_res_fin)
         ]
 
+    # ============================================================
+    # KPI'S PRINCIPALES (ARRIBA DEL TODO)
+    # ============================================================
+    st.subheader("📈 Indicadores Generales")
+
+    total_graves = len(df_filtrado[df_filtrado['condicion'] == 'grave'])
+    total_leves = len(df_filtrado[df_filtrado['condicion'] == 'leve'])
+    total_noindica = len(df_filtrado[df_filtrado['condicion'] == 'noindica'])
+    total_general = len(df_filtrado)
+
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
+
+    with col1:
+        st.metric("🔴 Graves", total_graves)
+    with col2:
+        st.metric("🟡 Leves", total_leves)
+    with col3:
+        st.metric("⚪ No Indica", total_noindica)
+    with col4:
+        st.metric("📌 Total Errores", total_general)
+    with col5:
+        st.metric("✅ Aprobados", total_aprobados)
+    with col6:
+        st.metric("📦 Registros BD", total_registros_bd)
+
     if df_filtrado.empty:
-        st.warning("⚠️ No hay datos que coincidan con los filtros seleccionados.")
+        st.info("No hay errores con los filtros seleccionados.")
         return
 
     # ============================================================
-    # 1. GRÁFICO DE BARRAS: Errores por Módulo y Condición
+    # GRÁFICO DE BARRAS
     # ============================================================
+    st.markdown("---")
     st.subheader("📊 Errores por Módulo y Condición")
 
-    df_grafico = (
-        df_filtrado.groupby(['modulo', 'condicion'])
-        .size()
-        .reset_index(name='total')
-    )
-
-    # Pivot para gráfico agrupado
+    df_grafico = df_filtrado.groupby(['modulo', 'condicion']).size().reset_index(name='total')
     df_pivot = df_grafico.pivot(index='modulo', columns='condicion', values='total').fillna(0)
 
-    # Asegurar que existan columnas 'leve', 'grave', 'noindica'
     for cond in ['leve', 'grave', 'noindica']:
         if cond not in df_pivot.columns:
             df_pivot[cond] = 0
@@ -241,10 +257,11 @@ def render():
     )
 
     # ============================================================
-    # 2. TABLA RESUMEN AGRUPADA POR CÓDIGO PRINCIPAL (FI_02, BM_01...)
+    # TABLA RESUMEN POR CÓDIGO BASE
     # ============================================================
+    st.markdown("---")
     st.subheader("📋 Resumen por Código Base")
-    st.markdown("*Errores agrupados por código principal (ej: FI_02, BM_01)*")
+    st.caption("Errores agrupados por código principal (ej: FI_02, BM_01)")
 
     df_resumen = (
         df_filtrado.groupby(['modulo', 'codigo_principal'])
@@ -258,15 +275,12 @@ def render():
         })
     )
 
-    st.dataframe(
-        df_resumen,
-        use_container_width=True,
-        hide_index=True
-    )
+    st.dataframe(df_resumen, use_container_width=True, hide_index=True)
 
     # ============================================================
-    # 3. TABLA DETALLE POR CÓDIGO COMPLETO
+    # TABLA DETALLE POR CÓDIGO COMPLETO
     # ============================================================
+    st.markdown("---")
     st.subheader("📋 Detalle por Error Específico")
 
     df_detalle = (
@@ -282,29 +296,7 @@ def render():
         })
     )
 
-    st.dataframe(
-        df_detalle,
-        use_container_width=True,
-        hide_index=True
-    )
-
-    # --- Totales ---
-    total_graves = df_filtrado[df_filtrado['condicion'] == 'grave'].shape[0]
-    total_leves = df_filtrado[df_filtrado['condicion'] == 'leve'].shape[0]
-    total_noindica = df_filtrado[df_filtrado['condicion'] == 'noindica'].shape[0]
-    total_general = len(df_filtrado)
-
-    col1, col2, col3, col4, col5 = st.columns(5)
-    with col1:
-        st.metric("🔴 Graves", total_graves)
-    with col2:
-        st.metric("🟡 Leves", total_leves)
-    with col3:
-        st.metric("⚪ No Indica", total_noindica)
-    with col4:
-        st.metric("📌 Total General", total_general)
-    with col5:
-        st.metric("📦 Registros BD", len(df_calidad))
+    st.dataframe(df_detalle, use_container_width=True, hide_index=True)
 
     st.markdown("---")
-    st.caption(f"Datos obtenidos de la tabla pública 'calidad_externa'. Última actualización: al recargar la página.")
+    st.caption("Datos de tabla pública 'calidad_externa'")
