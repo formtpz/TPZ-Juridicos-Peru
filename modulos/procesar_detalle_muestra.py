@@ -4,11 +4,12 @@ import pandas as pd
 import re
 from io import BytesIO
 from permisos import validar_acceso
-from db import execute  # ← Importamos de db.py (ya modificado)
+from db import get_connection  # ← Usamos get_connection directamente
+import traceback
 
 
 # ============================================================
-# Funciones de procesamiento
+# Funciones de procesamiento (se mantienen igual)
 # ============================================================
 
 def renombrar_leves_graves(df):
@@ -54,7 +55,6 @@ def normalizar_nombres_columnas(df):
     """
     Convierte nombres de columnas a minúsculas,
     reemplaza espacios, puntos y dos puntos por guiones bajos.
-    Ejemplo: 'FI.02.01' -> 'fi_02_01', 'FECHA RECEPCION:' -> 'fecha_recepcion'
     """
     df = df.copy()
     df.columns = [
@@ -204,81 +204,114 @@ def procesar_excel_detalle_muestra(file_bytes, file_name):
 
 
 # ============================================================
-# Función para guardar en PostgreSQL
+# Función MEJORADA para guardar en PostgreSQL
 # ============================================================
 
 def guardar_en_bd(df_consolidado):
     """
     Inserta el DataFrame consolidado en public.calidad_externa.
-    Solo inserta las columnas que existen en la tabla.
+    Versión mejorada con mejor manejo de errores y debug.
     """
+    
+    # Lista completa de columnas de la tabla
+    columnas_bd = [
+        'distrito', 'entregable', 'poligono', 'pol_sicun',
+        'fecha_recepcion', 'fecha_resultado', 'unidad_administrativa', 'crc',
+        'fi_02_01', 'fi_02_02', 'fi_02_03', 'fi_02_04',
+        'fi_03_01', 'fi_04_01', 'fi_05_01', 'fi_05_02', 'fi_05_03',
+        'fi_05_04', 'fi_05_05', 'fi_05_06', 'fi_06_01', 'fi_06_02',
+        'fi_06_03', 'fi_06_04', 'fi_06_05', 'fi_06_06', 'fi_07_01',
+        'fi_07_02', 'fi_08_01', 'fi_08_02', 'fi_08_03', 'fi_08_04',
+        'fi_08_05', 'fi_08_06', 'fi_08_07', 'fi_08_08', 'fi_09_01',
+        'fi_09_02', 'fi_10_01', 'fi_10_02', 'fi_10_03', 'fi_10_04',
+        'fi_11_01', 'fi_11_02', 'fi_11_03', 'fi_12_01', 'fi_12_02',
+        'fi_12_03', 'fi_12_04', 'fi_13_01', 'fi_13_02', 'fi_13_03',
+        'fi_13_04', 'fi_14_01', 'fi_14_02', 'fi_14_03', 'fi_14_04',
+        'fi_15_01', 'fi_15_02', 'fi_15_03', 'fi_16_01', 'fi_16_02',
+        'fi_17_01', 'fi_17_02', 'fi_17_03', 'fi_18_01', 'fi_18_02',
+        'fi_18_03', 'fi_19_01', 'fi_19_02', 'fi_20_01', 'fi_20_02',
+        'fi_20_03', 'fi_21_01', 'fi_21_02', 'fi_21_03', 'fi_22_01',
+        'fi_23_01', 'fi_23_02', 'fi_24_01', 'fi_24_02', 'fi_24_03',
+        'fi_25_01', 'fi_25_02', 'fi_25_03', 'fi_25_04', 'fi_25_05',
+        'fi_25_06', 'fi_26_01', 'fi_26_02', 'fi_27_01', 'fi_27_02',
+        'fi_28_01', 'fi_28_02', 'fi_29_01', 'fi_29_02', 'fi_29_03',
+        'fi_29_04', 'fi_29_05', 'fi_29_06', 'fi_29_07', 'fi_29_08',
+        'fi_29_09', 'fi_30_01', 'fi_30_02', 'fi_30_03', 'fi_30_04',
+        'fi_30_05', 'fi_30_06', 'fi_30_07', 'fi_30_08', 'fi_30_09',
+        'fi_31_01', 'fi_31_02', 'fi_32_01', 'fi_32_02', 'fi_32_03',
+        'fi_33_01', 'fi_33_02', 'fi_34_01', 'fi_34_02', 'fi_34_03',
+        'fi_34_04', 'fi_35_01', 'fi_35_02', 'fi_35_03', 'fi_35_04',
+        'fi_35_05', 'fi_35_06', 'fi_36_01', 'fi_36_02', 'fi_36_03',
+        'fi_37_01', 'fi_37_02', 'fi_37_03', 'fi_37_04', 'fi_37_05',
+        'fi_37_06', 'fi_38_01', 'fi_39_01'
+    ]
+    
     try:
-        # Columnas de la tabla calidad_externa
-        columnas_bd = [
-            'distrito', 'entregable', 'poligono', 'pol_sicun',
-            'fecha_recepcion', 'fecha_resultado', 'unidad_administrativa', 'crc',
-            'fi_02_01', 'fi_02_02', 'fi_02_03', 'fi_02_04',
-            'fi_03_01', 'fi_04_01', 'fi_05_01', 'fi_05_02', 'fi_05_03',
-            'fi_05_04', 'fi_05_05', 'fi_05_06', 'fi_06_01', 'fi_06_02',
-            'fi_06_03', 'fi_06_04', 'fi_06_05', 'fi_06_06', 'fi_07_01',
-            'fi_07_02', 'fi_08_01', 'fi_08_02', 'fi_08_03', 'fi_08_04',
-            'fi_08_05', 'fi_08_06', 'fi_08_07', 'fi_08_08', 'fi_09_01',
-            'fi_09_02', 'fi_10_01', 'fi_10_02', 'fi_10_03', 'fi_10_04',
-            'fi_11_01', 'fi_11_02', 'fi_11_03', 'fi_12_01', 'fi_12_02',
-            'fi_12_03', 'fi_12_04', 'fi_13_01', 'fi_13_02', 'fi_13_03',
-            'fi_13_04', 'fi_14_01', 'fi_14_02', 'fi_14_03', 'fi_14_04',
-            'fi_15_01', 'fi_15_02', 'fi_15_03', 'fi_16_01', 'fi_16_02',
-            'fi_17_01', 'fi_17_02', 'fi_17_03', 'fi_18_01', 'fi_18_02',
-            'fi_18_03', 'fi_19_01', 'fi_19_02', 'fi_20_01', 'fi_20_02',
-            'fi_20_03', 'fi_21_01', 'fi_21_02', 'fi_21_03', 'fi_22_01',
-            'fi_23_01', 'fi_23_02', 'fi_24_01', 'fi_24_02', 'fi_24_03',
-            'fi_25_01', 'fi_25_02', 'fi_25_03', 'fi_25_04', 'fi_25_05',
-            'fi_25_06', 'fi_26_01', 'fi_26_02', 'fi_27_01', 'fi_27_02',
-            'fi_28_01', 'fi_28_02', 'fi_29_01', 'fi_29_02', 'fi_29_03',
-            'fi_29_04', 'fi_29_05', 'fi_29_06', 'fi_29_07', 'fi_29_08',
-            'fi_29_09', 'fi_30_01', 'fi_30_02', 'fi_30_03', 'fi_30_04',
-            'fi_30_05', 'fi_30_06', 'fi_30_07', 'fi_30_08', 'fi_30_09',
-            'fi_31_01', 'fi_31_02', 'fi_32_01', 'fi_32_02', 'fi_32_03',
-            'fi_33_01', 'fi_33_02', 'fi_34_01', 'fi_34_02', 'fi_34_03',
-            'fi_34_04', 'fi_35_01', 'fi_35_02', 'fi_35_03', 'fi_35_04',
-            'fi_35_05', 'fi_35_06', 'fi_36_01', 'fi_36_02', 'fi_36_03',
-            'fi_37_01', 'fi_37_02', 'fi_37_03', 'fi_37_04', 'fi_37_05',
-            'fi_37_06', 'fi_38_01', 'fi_39_01'
-        ]
-        
-        # Filtrar columnas que existen en el DataFrame
+        # 1. Verificar columnas coincidentes
         columnas_existentes = [col for col in columnas_bd if col in df_consolidado.columns]
         
         if not columnas_existentes:
-            return False, "❌ No hay columnas coincidentes entre el Excel y la tabla."
+            st.error("❌ No hay columnas coincidentes. Columnas en el DataFrame:")
+            st.write(list(df_consolidado.columns[:10]))  # Mostrar primeras 10
+            return False
+        
+        st.info(f"📊 Se insertarán {len(columnas_existentes)} columnas de {len(df_consolidado)} registros")
+        
+        # 2. Obtener conexión
+        conn = get_connection()
+        cur = conn.cursor()
         
         registros_insertados = 0
         
-        for _, row in df_consolidado.iterrows():
-            valores = []
-            for col in columnas_existentes:
-                val = row[col]
-                if pd.notna(val):
-                    val_str = str(val)[:30]
-                else:
-                    val_str = None
-                valores.append(val_str)
-            
-            columnas_str = ', '.join(columnas_existentes)
-            placeholders = ', '.join(['%s'] * len(columnas_existentes))
-            
-            query = f"""
-                INSERT INTO public.calidad_externa ({columnas_str})
-                VALUES ({placeholders})
-            """
-            
-            execute(query, params=valores)
-            registros_insertados += 1
+        # 3. Insertar fila por fila con manejo de errores individual
+        for idx, (_, row) in enumerate(df_consolidado.iterrows()):
+            try:
+                valores = []
+                for col in columnas_existentes:
+                    val = row[col]
+                    if pd.notna(val):
+                        val_str = str(val)[:30]
+                    else:
+                        val_str = None
+                    valores.append(val_str)
+                
+                columnas_str = ', '.join(columnas_existentes)
+                placeholders = ', '.join(['%s'] * len(columnas_existentes))
+                
+                query = f"""
+                    INSERT INTO public.calidad_externa ({columnas_str})
+                    VALUES ({placeholders})
+                """
+                
+                cur.execute(query, valores)
+                registros_insertados += 1
+                
+            except Exception as row_error:
+                st.warning(f"⚠️ Error en fila {idx}: {str(row_error)[:100]}")
+                continue
         
-        return True, f"✅ {registros_insertados} registros insertados en calidad_externa."
+        # 4. Commit final
+        conn.commit()
+        cur.close()
+        
+        if registros_insertados > 0:
+            st.success(f"✅ {registros_insertados} registros insertados exitosamente")
+            return True
+        else:
+            st.error("❌ No se pudo insertar ningún registro")
+            return False
     
     except Exception as e:
-        return False, f"❌ Error al guardar: {str(e)}"
+        st.error(f"❌ Error de conexión: {str(e)}")
+        st.code(traceback.format_exc())
+        
+        # Intentar hacer rollback si hay conexión activa
+        try:
+            conn.rollback()
+        except:
+            pass
+        
+        return False
 
 
 # ============================================================
@@ -286,7 +319,7 @@ def guardar_en_bd(df_consolidado):
 # ============================================================
 
 def render():
-    validar_acceso("Depuración de Datos")  # ← Debe coincidir con PERMISOS_POR_PERFIL
+    validar_acceso("Depuración de Datos")
 
     st.title("📋 Compilador de Detalle de Errores")
     st.markdown("""
@@ -323,7 +356,11 @@ def render():
 
                     with st.expander("🔍 Vista previa (50 filas)"):
                         st.dataframe(df_consolidado.head(50), use_container_width=True)
+                    
+                    with st.expander("🔍 Columnas del DataFrame"):
+                        st.write(list(df_consolidado.columns))
 
+                    # Exportar a Excel
                     output = BytesIO()
                     with pd.ExcelWriter(output, engine='openpyxl') as writer:
                         df_consolidado.to_excel(writer, index=False, sheet_name='Detalle Errores')
@@ -341,13 +378,15 @@ def render():
                         )
                     
                     with col2:
-                        if st.button("💾 Guardar en BD", type="secondary", use_container_width=True):
-                            with st.spinner("Guardando..."):
-                                exito, mensaje = guardar_en_bd(df_consolidado)
-                                if exito:
-                                    st.success(mensaje)
+                        # Usar un key único para evitar que desaparezca
+                        if st.button("💾 Guardar en BD", key="btn_guardar_bd", type="secondary", use_container_width=True):
+                            with st.spinner("Guardando en la base de datos..."):
+                                # Volver a obtener el DataFrame del session_state
+                                df_to_save = st.session_state.get('df_consolidado')
+                                if df_to_save is not None:
+                                    guardar_en_bd(df_to_save)
                                 else:
-                                    st.error(mensaje)
+                                    st.error("❌ No hay datos para guardar. Procesa los archivos primero.")
                 else:
                     st.error("❌ Ningún archivo contenía datos válidos.")
     else:
