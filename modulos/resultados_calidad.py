@@ -156,38 +156,126 @@ def render():
     # FILTROS EN SIDEBAR
     # ============================================================
     st.sidebar.header("🔍 Filtros")
-
+    
+    # ============================================================
+    # DISTRITO
+    # ============================================================
     distritos = sorted(df_errores['distrito'].dropna().unique())
-    filtro_distrito = st.sidebar.multiselect("Distrito", options=distritos, default=[])
-
-    entregables = sorted(df_errores['entregable'].dropna().unique())
-    filtro_entregable = st.sidebar.multiselect("Entregable", options=entregables, default=[])
-
-    poligonos = sorted(df_errores['poligono'].dropna().unique())
-    filtro_poligono = st.sidebar.multiselect("Polígono", options=poligonos, default=[])
-
+    
+    filtro_distrito = st.sidebar.multiselect(
+        "Distrito",
+        options=distritos,
+        default=[]
+    )
+    
+    # ============================================================
+    # DATAFRAME BASE SEGÚN DISTRITO
+    # ============================================================
+    df_temp = df_errores.copy()
+    
+    if filtro_distrito:
+        df_temp = df_temp[
+            df_temp['distrito'].isin(filtro_distrito)
+        ]
+    
+    # ============================================================
+    # POLÍGONO DEPENDIENTE DEL DISTRITO
+    # ============================================================
+    poligonos = sorted(
+        df_temp['poligono'].dropna().unique()
+    )
+    
+    filtro_poligono = st.sidebar.multiselect(
+        "Polígono",
+        options=poligonos,
+        default=[]
+    )
+    
+    # ============================================================
+    # DATAFRAME SEGÚN DISTRITO + POLÍGONO
+    # ============================================================
+    if filtro_poligono:
+        df_temp = df_temp[
+            df_temp['poligono'].isin(filtro_poligono)
+        ]
+    
+    # ============================================================
+    # ENTREGABLE DEPENDIENTE DE DISTRITO + POLÍGONO
+    # ============================================================
+    entregables = sorted(
+        df_temp['entregable'].dropna().unique()
+    )
+    
+    filtro_entregable = st.sidebar.multiselect(
+        "Entregable",
+        options=entregables,
+        default=[]
+    )
+    
+    # ============================================================
+    # FECHAS
+    # ============================================================
     st.sidebar.markdown("---")
     st.sidebar.subheader("Fecha Recepción")
+    
     col1, col2 = st.sidebar.columns(2)
+    
     with col1:
-        fecha_rec_inicio = st.date_input("Inicio", value=None, key="rec_ini")
+        fecha_rec_inicio = st.date_input(
+            "Inicio",
+            value=None,
+            key="rec_ini"
+        )
+    
     with col2:
-        fecha_rec_fin = st.date_input("Fin", value=None, key="rec_fin")
-
+        fecha_rec_fin = st.date_input(
+            "Fin",
+            value=None,
+            key="rec_fin"
+        )
+    
     st.sidebar.subheader("Fecha Resultado")
+    
     col3, col4 = st.sidebar.columns(2)
+    
     with col3:
-        fecha_res_inicio = st.date_input("Inicio", value=None, key="res_ini")
+        fecha_res_inicio = st.date_input(
+            "Inicio",
+            value=None,
+            key="res_ini"
+        )
+    
     with col4:
-        fecha_res_fin = st.date_input("Fin", value=None, key="res_fin")
-
+        fecha_res_fin = st.date_input(
+            "Fin",
+            value=None,
+            key="res_fin"
+        )
+    
+    # ============================================================
+    # MODULOS Y CONDICIONES
+    # ============================================================
     st.sidebar.markdown("---")
-    modulos = sorted(df_errores['modulo'].dropna().unique())
-    filtro_modulo = st.sidebar.multiselect("Módulo", options=modulos, default=[])
-
-    condiciones = sorted(df_errores['condicion'].dropna().unique())
-    filtro_condicion = st.sidebar.multiselect("Condición", options=condiciones, default=[])
-
+    
+    modulos = sorted(
+        df_temp['modulo'].dropna().unique()
+    )
+    
+    filtro_modulo = st.sidebar.multiselect(
+        "Módulo",
+        options=modulos,
+        default=[]
+    )
+    
+    condiciones = sorted(
+        df_temp['condicion'].dropna().unique()
+    )
+    
+    filtro_condicion = st.sidebar.multiselect(
+        "Condición",
+        options=condiciones,
+        default=[]
+    )
     # --- Aplicar filtros ---
     df_filtrado = df_errores.copy()
 
