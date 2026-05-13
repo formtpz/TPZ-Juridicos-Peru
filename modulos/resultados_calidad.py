@@ -108,6 +108,7 @@ def transformar_a_errores(df_calidad, df_desc):
                 registros.append({
                     'distrito': row.get('distrito'),
                     'entregable': row.get('entregable'),
+                    'poligono': row.get('poligono'),
                     'fecha_recepcion': row.get('fecha_recepcion'),
                     'fecha_resultado': row.get('fecha_resultado'),
                     'codigo_completo': codigo,
