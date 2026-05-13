@@ -313,4 +313,4 @@ def render():
     st.dataframe(df_detalle, use_container_width=True, hide_index=True)
 
     st.markdown("---")
-    st.caption("Datos de tabla pública 'calidad_externa'")abla pública 'calidad_externa'")
+    st.caption("Datos de tabla pública 'calidad_externa'")
