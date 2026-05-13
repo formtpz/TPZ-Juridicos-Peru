@@ -162,6 +162,9 @@ def render():
     entregables = sorted(df_errores['entregable'].dropna().unique())
     filtro_entregable = st.sidebar.multiselect("Entregable", options=entregables, default=[])
 
+    poligonos = sorted(df_errores['POLIGONO'].dropna().unique())
+    filtro_poligono = st.sidebar.multiselect("Polígono", options=poligonos, default=[])
+
     st.sidebar.markdown("---")
     st.sidebar.subheader("Fecha Recepción")
     col1, col2 = st.sidebar.columns(2)
@@ -191,6 +194,8 @@ def render():
         df_filtrado = df_filtrado[df_filtrado['distrito'].isin(filtro_distrito)]
     if filtro_entregable:
         df_filtrado = df_filtrado[df_filtrado['entregable'].isin(filtro_entregable)]
+    if filtro_poligono: 
+        df_filtrado = df_filtrado[df_filtrado['POLIGONO'].isin(filtro_poligono)]
     if filtro_modulo:
         df_filtrado = df_filtrado[df_filtrado['modulo'].isin(filtro_modulo)]
     if filtro_condicion:
