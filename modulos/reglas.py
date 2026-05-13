@@ -8,7 +8,7 @@ from datetime import datetime
 from permisos import validar_acceso
 
 # ======================================================
-# Configuración del repositorio GitHub (SOLO PARA RENTAS)
+# Configuración del repositorio GitHub (PARA ARCHIVOS EN NUBE)
 # ======================================================
 GITHUB_OWNER = "formtpz"          
 GITHUB_REPO = "TPZ-Juridicos-Peru"              
@@ -16,51 +16,49 @@ GITHUB_BRANCH = "main"
 RENTAS_FOLDER = "Rentas_resumidos"   
 
 # Directorio local para las reglas de validación
-REGLAS_DIR = "Reglas" # Asegúrate de que el nombre de la carpeta coincida (Reglas o reglas)
+REGLAS_DIR = "Reglas" 
 
 # ======================================================
-# Funciones para obtener RENTAS desde GitHub
+# LISTA GLOBAL DE MUNICIPIOS
 # ======================================================
-@st.cache_data(ttl=300)
-def obtener_lista_rentas():
-    """
-    Obtiene la lista de archivos Excel del directorio de rentas en GitHub.
-    """
-    url_api = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/contents/{RENTAS_FOLDER}?ref={GITHUB_BRANCH}"
-    headers = {"Accept": "application/vnd.github.v3+json"}
-    try:
-        respuesta = requests.get(url_api, headers=headers)
-        if respuesta.status_code == 200:
-            archivos = respuesta.json()
-            return [
-                {"name": f["name"], "download_url": f["download_url"]}
-                for f in archivos
-                if f["name"].endswith(".xlsx") or f["name"].endswith(".xls")
-            ]
-        else:
-            st.error(f"Error al acceder a la carpeta de rentas en GitHub (código {respuesta.status_code}).")
-            return []
-    except Exception as e:
-        st.error(f"Error de conexión con GitHub: {e}")
-        return []
+MUNICIPIOS = [
+    "Chorrillos",
+    "San Juan de Miraflores",
+    "Villa El Salvador"
+]
 
-def obtener_rentas(url_raw):
+# ======================================================
+# Funciones de descarga desde GitHub
+# ======================================================
+def obtener_rentas(municipio):
     """
-    Descarga el archivo de rentas seleccionado.
+    Descarga el archivo de rentas correspondiente. 
+    El mapeo de qué archivo le toca a cada municipio se maneja internamente aquí.
     """
+    # Mapeo interno: El usuario no interactúa con estos nombres, solo el código.
+    archivos_por_municipio = {
+        "Chorrillos": "RENTAS_CHORRILLOS_2025_RESUMEN.xlsx",
+        "San Juan de Miraflores": "RENTAS_SJM_2025_RESUMEN.xlsx",
+        "Villa El Salvador": "RENTAS_VES_2025_RESUMEN.xlsx"
+    }
+    
+    nombre_archivo = archivos_por_municipio.get(municipio)
+    
+    if not nombre_archivo:
+        return None
+        
+    url_raw = f"https://raw.githubusercontent.com/{GITHUB_OWNER}/{GITHUB_REPO}/{GITHUB_BRANCH}/{RENTAS_FOLDER}/{nombre_archivo}"
+    
     try:
         return pd.read_excel(url_raw)
     except Exception as e:
-        st.warning(f"No se pudo cargar el archivo de rentas: {e}")
+        st.warning(f"No se pudo cargar el archivo de rentas para {municipio}: {e}")
         return None
 
 # ======================================================
 # Ejecución de reglas (Lectura LOCAL)
 # ======================================================
 def cargar_y_ejecutar_reglas(dataframes):
-    """
-    Lee todos los archivos .py locales en REGLAS_DIR y los ejecuta automáticamente.
-    """
     todos_los_errores = []
     
     if not os.path.exists(REGLAS_DIR):
@@ -79,7 +77,6 @@ def cargar_y_ejecutar_reglas(dataframes):
         st.text(f"▶ Ejecutando regla: {nombre_modulo}")
         
         try:
-            # Carga dinámica local
             spec = importlib.util.spec_from_file_location(nombre_modulo, ruta_archivo)
             modulo = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(modulo)
@@ -106,65 +103,66 @@ def render():
 
     st.title("🔍 Validación Relacional de Insumos Catastrales")
     st.markdown("""
-    Sube los archivos locales de **Unidades Administrativas** e **Ingresos**.
-    El archivo de **Rentas** se selecciona directamente desde el repositorio de la nube.
-    Todas las reglas del sistema se ejecutarán automáticamente.
+    Selecciona el municipio a evaluar y sube los insumos requeridos. 
+    Las bases de datos externas (como Rentas) se conectarán automáticamente según tu selección.
     """)
 
-    # 1. Obtener archivos de Rentas para el menú desplegable
-    lista_rentas = obtener_lista_rentas()
-    nombres_rentas = [r["name"] for r in lista_rentas]
-
-    archivo_rentas_seleccionado = st.selectbox(
-        "📂 Selecciona el archivo de Rentas",
-        options=nombres_rentas,
-        index=0 if nombres_rentas else None,
-        help="Elige la base de rentas contra la cual quieres cruzar la información."
+    # 1. Selección de Municipio (Variable Global para todo el proceso)
+    municipio_seleccionado = st.selectbox(
+        "🏛️ Selecciona el Municipio",
+        options=MUNICIPIOS,
+        help="El municipio define los parámetros geográficos, normativos y las bases de datos externas a utilizar."
     )
 
     st.markdown("---")
+    st.subheader("📂 Carga de Insumos Locales")
 
-    # 2. Carga de archivos locales
+    # 2. Carga de archivos locales (Organizados en cuadrícula)
     col1, col2 = st.columns(2)
     with col1:
-        archivo_unidades = st.file_uploader("📂 Reporte de Unidades Administrativas", type=["xlsx", "xls"], key="main_unidades")
+        archivo_unidades = st.file_uploader("1. Unidades Administrativas", type=["xlsx", "xls"], key="ua")
+        archivo_ingresos = st.file_uploader("3. Ingresos", type=["xlsx", "xls"], key="in")
     with col2:
-        archivo_ingresos = st.file_uploader("📂 Reporte de Ingresos", type=["xlsx", "xls"], key="main_ingresos")
+        archivo_construcciones = st.file_uploader("2. Construcciones", type=["xlsx", "xls"], key="co")
+        archivo_ingresos_lote = st.file_uploader("4. Ingresos por Lote", type=["xlsx", "xls"], key="inlote")
+
+    st.markdown("---")
 
     # Botón de ejecución
     if st.button("🚀 Ejecutar todas las validaciones", type="primary", use_container_width=True):
+        
         if not archivo_unidades or not archivo_ingresos:
-            st.error("Es necesario cargar ambos archivos locales (Unidades e Ingresos).")
-            return
+            st.warning("⚠️ Recuerda que algunas reglas se omitirán si no subes todos los archivos que requieren.")
             
-        if not archivo_rentas_seleccionado:
-            st.error("No se ha seleccionado un archivo de Rentas válido.")
-            return
-
-        url_rentas_seleccionado = next(r["download_url"] for r in lista_rentas if r["name"] == archivo_rentas_seleccionado)
-
         dataframes = {}
         
-        # Lectura de DataFrames
-        with st.spinner("Leyendo archivos locales..."):
+        # Guardamos el municipio en el diccionario de datos para que las reglas puedan leerlo
+        dataframes['municipio'] = municipio_seleccionado
+        
+        # Lectura de DataFrames locales
+        with st.spinner("Procesando insumos locales en memoria..."):
             try:
-                dataframes['unidades'] = pd.read_excel(archivo_unidades)
-                dataframes['ingresos'] = pd.read_excel(archivo_ingresos)
+                if archivo_unidades: dataframes['unidades'] = pd.read_excel(archivo_unidades)
+                if archivo_ingresos: dataframes['ingresos'] = pd.read_excel(archivo_ingresos)
+                if archivo_construcciones: dataframes['construcciones'] = pd.read_excel(archivo_construcciones)
+                if archivo_ingresos_lote: dataframes['ingresos_lote'] = pd.read_excel(archivo_ingresos_lote)
             except Exception as e:
                 st.error(f"Error al leer archivos locales: {e}")
                 return
 
-        with st.spinner(f"📥 Descargando '{archivo_rentas_seleccionado}'..."):
-            df_rentas = obtener_rentas(url_rentas_seleccionado)
+        # Descarga automática de archivos de la nube
+        with st.spinner(f"📥 Conectando con bases de datos de {municipio_seleccionado}..."):
+            df_rentas = obtener_rentas(municipio_seleccionado)
             if df_rentas is not None:
                 dataframes['rentas'] = df_rentas
             else:
-                st.warning("No se pudo cargar Rentas. Las reglas relacionales podrían fallar.")
+                st.error("No se pudo establecer conexión con la base de rentas del municipio. Las reglas relacionales podrían fallar.")
+                return
 
         # Ejecutar reglas
         st.markdown("---")
-        st.subheader("⚙️ Procesando motor de reglas...")
-        with st.spinner("Ejecutando validaciones catastrales..."):
+        st.subheader(f"⚙️ Analizando datos para {municipio_seleccionado}...")
+        with st.spinner("Ejecutando motor de reglas catastrales..."):
             lista_errores = cargar_y_ejecutar_reglas(dataframes)
 
         # Generar Reporte
@@ -197,11 +195,14 @@ def render():
                 df_resumen_ordenado.to_excel(writer, index=False, sheet_name="Errores")
             output.seek(0)
 
+            # El nombre del archivo ahora incluye el municipio de forma dinámica
             timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+            nombre_descarga = f"resumen_errores_{municipio_seleccionado.replace(' ', '_')}_{timestamp}.xlsx"
+            
             st.download_button(
                 label="⬇️ Descargar reporte de errores",
                 data=output,
-                file_name=f"resumen_errores_{timestamp}.xlsx",
+                file_name=nombre_descarga,
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 type="primary"
             )
