@@ -162,7 +162,7 @@ def render():
     entregables = sorted(df_errores['entregable'].dropna().unique())
     filtro_entregable = st.sidebar.multiselect("Entregable", options=entregables, default=[])
 
-    poligonos = sorted(df_errores['POLIGONO'].dropna().unique())
+    poligonos = sorted(df_errores['poligono'].dropna().unique())
     filtro_poligono = st.sidebar.multiselect("Polígono", options=poligonos, default=[])
 
     st.sidebar.markdown("---")
@@ -195,7 +195,7 @@ def render():
     if filtro_entregable:
         df_filtrado = df_filtrado[df_filtrado['entregable'].isin(filtro_entregable)]
     if filtro_poligono: 
-        df_filtrado = df_filtrado[df_filtrado['POLIGONO'].isin(filtro_poligono)]
+        df_filtrado = df_filtrado[df_filtrado['poligono'].isin(filtro_poligono)]
     if filtro_modulo:
         df_filtrado = df_filtrado[df_filtrado['modulo'].isin(filtro_modulo)]
     if filtro_condicion:
