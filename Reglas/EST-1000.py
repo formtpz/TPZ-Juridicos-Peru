@@ -1,12 +1,11 @@
 import pandas as pd
 
 def descomponer_codigo(codigo, tipo='crc'):
-    """Descompone el código dependiendo de si es un CRC completo (23) o solo Lote (12)"""
+    """Descompone el código dependiendo de si es un CRC completo (23) o solo Lote (14)"""
     if pd.isna(codigo) or str(codigo).strip() == '':
         return None
         
     if tipo == 'crc':
-        # CORRECCIÓN: Se usa .replace() normal para strings de Python, sin el .str
         cod_str = str(codigo).strip().replace(".0", "").zfill(23)
         try:
             return {
@@ -20,8 +19,8 @@ def descomponer_codigo(codigo, tipo='crc'):
             }
         except: return None
     else:
-        # CORRECCIÓN: Igual aquí, sin el .str
-        cod_str = str(codigo).strip().replace(".0", "").zfill(12)
+        # CORRECCIÓN 1: Vuelve a 14 para que no se corte el string antes de llegar al Lote
+        cod_str = str(codigo).strip().replace(".0", "").zfill(14)
         try:
             return {
                 'Sector':   cod_str[6:8],   
@@ -50,8 +49,8 @@ def validar(dfs):
             # Excluir las unidades que terminen en '999'
             df_ua_valid = df_ua_valid[df_ua_valid['CRC_Str'].str[-3:] != '999']
             
-            # Agrupar por Lote (los primeros 12 dígitos del CRC)
-            df_ua_valid['Agrupador_Lote'] = df_ua_valid['CRC_Str'].str[:12]
+            # CORRECCIÓN 2: Vuelve a 14 para agrupar tomando la manzana y el lote completos
+            df_ua_valid['Agrupador_Lote'] = df_ua_valid['CRC_Str'].str[:14]
             conteo_ua = df_ua_valid.groupby('Agrupador_Lote').size()
             
             # Identificar los que tienen más de 2 unidades
@@ -88,7 +87,8 @@ def validar(dfs):
             df_inl_valid = df_inl.dropna(subset=[col_lote_inl])
             df_inl_valid = df_inl_valid[df_inl_valid[col_lote_inl].astype(str).str.strip() != '']
             
-            df_inl_valid['Lote_Str'] = df_inl_valid[col_lote_inl].astype(str).str.strip().str.replace(".0", "", regex=False).str.zfill(12)
+            # CORRECCIÓN 3: Vuelve a 14 para mantener el formato completo
+            df_inl_valid['Lote_Str'] = df_inl_valid[col_lote_inl].astype(str).str.strip().str.replace(".0", "", regex=False).str.zfill(14)
             
             # Agrupar y contar ingresos por cada lote
             conteo_inl = df_inl_valid.groupby('Lote_Str').size()
