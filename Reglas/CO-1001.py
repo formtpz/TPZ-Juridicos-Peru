@@ -41,12 +41,10 @@ def validar(dfs):
     df_valid = df.dropna(subset=[col_crc])
     df_valid = df_valid[df_valid[col_crc].astype(str).str.strip() != '']
     
-    # --- CORRECCIÓN CLAVE ---
     # Convertimos a string de 23 dígitos y extraemos hasta la Edificación (dígito 16)
     df_valid['CRC_Str'] = df_valid[col_crc].astype(str).str.strip().str.replace(".0", "", regex=False).str.zfill(23)
     df_valid['Agrupador_Edifica'] = df_valid['CRC_Str'].str[:16]
     
-    # Ahora agrupamos por el edificio base, no por el CRC completo
     agrupado = df_valid.groupby('Agrupador_Edifica')
     
     for agrupador, grupo in agrupado:
@@ -56,10 +54,15 @@ def validar(dfs):
         for p in pisos_raw:
             try:
                 num = int(float(p))
-                pisos_numericos.append(num)
+                # --- NUEVO FILTRO NORMATIVO ---
+                # Excluimos mezanines (>= 71) y sótanos (>= 81) de la validación consecutiva.
+                # Solo se evaluarán los pisos regulares (1, 2, 3...)
+                if num < 71:
+                    pisos_numericos.append(num)
             except ValueError:
                 pass 
                 
+        # Si después de filtrar no queda ningún piso regular, pasamos al siguiente
         if not pisos_numericos:
             continue
             
@@ -67,13 +70,13 @@ def validar(dfs):
         error_msg = None
         
         if pisos_unicos[0] != 1:
-            error_msg = f"El primer piso registrado es {pisos_unicos[0]}, pero la numeración siempre debe empezar en 1. (Pisos encontrados: {pisos_unicos})"
+            error_msg = f"El primer piso registrado es {pisos_unicos[0]}, pero la numeración siempre debe empezar en 1. (Pisos regulares encontrados: {pisos_unicos})"
         else:
             rango_esperado = list(range(1, max(pisos_unicos) + 1))
             if pisos_unicos != rango_esperado:
                 faltantes = list(set(rango_esperado) - set(pisos_unicos))
                 faltantes.sort()
-                error_msg = f"La numeración de pisos no es consecutiva. Faltan los pisos: {faltantes}. (Pisos encontrados: {pisos_unicos})"
+                error_msg = f"La numeración de pisos no es consecutiva. Faltan los pisos: {faltantes}. (Pisos regulares encontrados: {pisos_unicos})"
                 
         if error_msg:
             primer_crc_del_grupo = grupo[col_crc].iloc[0]
@@ -89,7 +92,7 @@ def validar(dfs):
                     'Manzana':  componentes['Manzana'],
                     'Lote':     componentes['Lote'],
                     'Edifica':  componentes['Edifica'],
-                    'Entrada':  '', # Se dejan vacíos porque el error es del edificio general
+                    'Entrada':  '', 
                     'Piso':     '', 
                     'Unidad':   '',
                     'Descripción del Error': error_msg
