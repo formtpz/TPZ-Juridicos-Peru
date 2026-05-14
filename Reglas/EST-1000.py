@@ -12,8 +12,8 @@ def descomponer_codigo(codigo, tipo='crc'):
             return {
                 'Sector':   cod_str[6:8],   
                 'Manzana':  cod_str[8:11],  
-                'Lote':     cod_str[11:12], 
-                'Edifica':  cod_str[12:16], 
+                'Lote':     cod_str[11:14], 
+                'Edifica':  cod_str[14:16], 
                 'Entrada':  cod_str[16:18], 
                 'Piso':     cod_str[18:20], 
                 'Unidad':   cod_str[20:23], 
