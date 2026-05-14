@@ -67,15 +67,12 @@ def validar(dfs):
     todos_los_otros_llenos = df_temp['tiene_cond'] & df_temp['tiene_forma'] & df_temp['tiene_doc'] & df_temp['tiene_tipo_part']
     error_falta_dato = df_temp['tiene_num'] & ~todos_los_otros_llenos
     
-    # Condición 2 (Viceversa): Num de partida está vacío, pero hay datos en alguno de los otros 4
-    #alguno_otro_lleno = df_temp['tiene_cond'] | df_temp['tiene_forma'] | df_temp['tiene_doc'] | df_temp['tiene_tipo_part']
-    #error_sobra_dato = ~df_temp['tiene_num'] & alguno_otro_lleno
+    # --- CORRECCIÓN AQUÍ ---
+    # Usamos la máscara booleana para filtrar la tabla original (df)
+    filas_con_error = df[error_falta_dato]
     
-    # Combinamos ambas condiciones de error
-    #filas_con_error = df[error_falta_dato | error_sobra_dato]
-    
-    # 4. Construir el reporte
-    for index, fila in error_falta_dato.iterrows():
+    # 4. Construir el reporte iterando sobre la tabla filtrada
+    for index, fila in filas_con_error.iterrows():
         crc = fila[col_crc]
         
         # --- Generación de mensaje dinámico para ayudar al digitador ---
@@ -93,7 +90,7 @@ def validar(dfs):
             faltantes = [col for col, val in datos_fila.items() if val == '']
             desc_error = f"Inconsistencia: '{col_num_partida}' está lleno ({num_partida_val}), pero están vacías las columnas: {', '.join(faltantes)}."
         else:
-            # Caso 2: No tiene Número de partida, pero llenaron las otras
+            # Caso 2: (No debería entrar aquí con la lógica actual, pero se mantiene por seguridad)
             sobrantes = [f"'{col}' ({val})" for col, val in datos_fila.items() if val != '']
             desc_error = f"Inconsistencia: '{col_num_partida}' está vacío, pero se registró información en: {', '.join(sobrantes)}."
         
