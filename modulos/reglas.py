@@ -155,9 +155,9 @@ def render():
             df_rentas = obtener_rentas(municipio_seleccionado)
             if df_rentas is not None:
                 dataframes['rentas'] = df_rentas
+                st.success(f"✅ Base de Rentas de {municipio_seleccionado} conectada.")
             else:
-                st.error("No se pudo establecer conexión con la base de rentas del municipio. Las reglas relacionales podrían fallar.")
-                return
+                st.warning("⚠️ No se pudo establecer conexión con la base de Rentas. La validación continuará, pero las reglas que requieran este cruce serán omitidas.")
 
         # Ejecutar reglas
         st.markdown("---")
