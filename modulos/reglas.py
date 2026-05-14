@@ -8,7 +8,7 @@ from datetime import datetime
 from permisos import validar_acceso
 
 # ======================================================
-# Configuración del repositorio GitHub (PARA ARCHIVOS EN NUBE)
+# Configuración del repositorio GitHub (PARA ARCHIVOS EN NUBE) 
 # ======================================================
 GITHUB_OWNER = "formtpz"          
 GITHUB_REPO = "TPZ-Juridicos-Peru"              
