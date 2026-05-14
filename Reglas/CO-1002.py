@@ -44,19 +44,17 @@ def validar(dfs):
     df_valid = df.dropna(subset=[col_crc, col_piso, col_fecha])
     df_valid = df_valid[df_valid[col_crc].astype(str).str.strip() != '']
     
-    # Convertimos la columna de fechas a objetos datetime de Pandas (robusto contra años o fechas completas)
+    # Convertimos la columna de fechas a objetos datetime de Pandas
     df_valid['Fecha_Format'] = pd.to_datetime(df_valid[col_fecha], errors='coerce')
-    
-    # Descartamos filas donde la fecha o el piso quedaron nulos tras la conversión
     df_valid = df_valid.dropna(subset=['Fecha_Format'])
     
-    # 3. Agrupamos cortando hasta la Edificación (dígito 16)
+    # 3. CORRECCIÓN CLAVE: Agrupamos cortando hasta la Edificación (dígito 16)
     df_valid['CRC_Str'] = df_valid[col_crc].astype(str).str.strip().str.replace(".0", "", regex=False).str.zfill(23)
     df_valid['Agrupador_Edifica'] = df_valid['CRC_Str'].str[:16]
     
     agrupado = df_valid.groupby('Agrupador_Edifica')
     
-    for crc, grupo in agrupado:
+    for agrupador, grupo in agrupado:
         diccionario_pisos = {}
         
         # 4. Extraer la fecha más antigua registrada para cada número de piso
@@ -64,29 +62,26 @@ def validar(dfs):
             valor_piso_raw = str(fila[col_piso]).strip()
             fecha = fila['Fecha_Format']
             
-            # Intentar convertir el piso a número entero (ignorando Sótanos/Azoteas en texto)
             try:
                 num_piso = int(float(valor_piso_raw))
             except ValueError:
                 continue
                 
-            # Guardamos la fecha mínima (más antigua) para ese piso
             if num_piso not in diccionario_pisos:
                 diccionario_pisos[num_piso] = fecha
             else:
                 if fecha < diccionario_pisos[num_piso]:
                     diccionario_pisos[num_piso] = fecha
                     
-        # Si no hay al menos dos pisos válidos para comparar, pasamos al siguiente CRC
         if len(diccionario_pisos) < 2:
             continue
             
-        # 5. Ordenamos los pisos de menor a mayor (1, 2, 3...)
+        # 5. Ordenamos los pisos de menor a mayor
         pisos_ordenados = sorted(diccionario_pisos.keys())
         
         error_msg = None
         
-        # 6. Evaluación cronológica: El piso actual no puede ser más antiguo que el piso inferior
+        # 6. Evaluación cronológica estricta
         for i in range(1, len(pisos_ordenados)):
             piso_actual = pisos_ordenados[i]
             piso_anterior = pisos_ordenados[i-1]
@@ -94,17 +89,19 @@ def validar(dfs):
             fecha_actual = diccionario_pisos[piso_actual]
             fecha_anterior = diccionario_pisos[piso_anterior]
             
-            # Regla: La fecha más antigua del Piso N debe ser mayor o igual a la del Piso N-1
             if fecha_actual < fecha_anterior:
-                año_ant = fecha_anterior.year
-                año_act = fecha_actual.year
-                error_msg = (f"Inconsistencia cronológica: El Piso {piso_actual} registra una construcción en el año {año_act}, "
-                             f"lo cual es anterior a la fecha de soporte del Piso {piso_anterior} (año {año_ant}).")
-                break # Rompemos el ciclo al primer error encontrado en el predio
+                # Extraemos la fecha completa en formato Día/Mes/Año para el reporte
+                str_fecha_ant = fecha_anterior.strftime('%d/%m/%Y')
+                str_fecha_act = fecha_actual.strftime('%d/%m/%Y')
+                
+                error_msg = (f"Inconsistencia cronológica: El Piso {piso_actual} registra una construcción con fecha "
+                             f"{str_fecha_act}, lo cual es anterior a la fecha de soporte del Piso {piso_anterior} ({str_fecha_ant}).")
+                break 
                 
         # 7. Reportar el error
         if error_msg:
-            componentes = descomponer_crc(crc)
+            primer_crc_del_grupo = grupo[col_crc].iloc[0]
+            componentes = descomponer_crc(primer_crc_del_grupo)
             
             if componentes:
                 if componentes['Unidad'] == '999':
@@ -116,15 +113,15 @@ def validar(dfs):
                     'Manzana':  componentes['Manzana'],
                     'Lote':     componentes['Lote'],
                     'Edifica':  componentes['Edifica'],
-                    'Entrada':  componentes['Entrada'],
-                    'Piso':     componentes['Piso'], 
-                    'Unidad':   componentes['Unidad'],
+                    'Entrada':  '', # Se dejan vacíos porque es un error de la edificación en general
+                    'Piso':     '', 
+                    'Unidad':   '',
                     'Descripción del Error': error_msg
                 })
             else:
                 errores.append({
                     'Nombre de la Regla': nombre_regla,
-                    'Código del Predio (CRC)': crc,
+                    'Código del Predio (CRC)': primer_crc_del_grupo,
                     'Descripción del Error': error_msg
                 })
 
