@@ -19,26 +19,16 @@ RENTAS_FOLDER = "Rentas_resumidos"
 REGLAS_DIR = "Reglas" 
 
 # ======================================================
-# Funciones para obtener RENTAS desde GitHub (Privado)
+# Funciones para obtener RENTAS desde GitHub
 # ======================================================
 @st.cache_data(ttl=300)
 def obtener_lista_rentas():
     """
     Obtiene la lista de archivos Excel del directorio de rentas en GitHub.
-    Usa el Token de acceso para repositorios privados.
     """
     url_api = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/contents/{RENTAS_FOLDER}?ref={GITHUB_BRANCH}"
-    
     headers = {"Accept": "application/vnd.github.v3+json"}
     
-    # Inyectar Token de Seguridad
-    try:
-        token = st.secrets["GITHUB_TOKEN"]
-        headers["Authorization"] = f"token {token}"
-    except Exception:
-        st.error("⚠️ Falta configurar el GITHUB_TOKEN en los secretos de Streamlit.")
-        return []
-
     try:
         respuesta = requests.get(url_api, headers=headers)
         if respuesta.status_code == 200:
@@ -57,17 +47,10 @@ def obtener_lista_rentas():
 
 def obtener_rentas(url_raw):
     """
-    Descarga el archivo de rentas seleccionado usando el Token de seguridad.
+    Descarga el archivo de rentas seleccionado.
     """
-    headers = {}
     try:
-        token = st.secrets["GITHUB_TOKEN"]
-        headers["Authorization"] = f"token {token}"
-    except Exception:
-        return None
-
-    try:
-        respuesta = requests.get(url_raw, headers=headers)
+        respuesta = requests.get(url_raw)
         if respuesta.status_code == 200:
             return pd.read_excel(BytesIO(respuesta.content))
         else:
@@ -126,7 +109,7 @@ def render():
     st.title("🔍 Validación Relacional de Insumos Catastrales")
     st.markdown("""
     Sube los archivos locales necesarios. El archivo de **Rentas** se selecciona y descarga 
-    automáticamente desde el repositorio seguro en la nube.
+    automáticamente desde el repositorio en la nube.
     """)
 
     # 1. Obtener archivos de Rentas para el menú desplegable (Conectando a GitHub)
@@ -177,7 +160,7 @@ def render():
         if archivo_rentas_seleccionado:
             url_rentas_seleccionado = next(r["download_url"] for r in lista_rentas if r["name"] == archivo_rentas_seleccionado)
             
-            with st.spinner(f"📥 Descargando '{archivo_rentas_seleccionado}' de forma segura..."):
+            with st.spinner(f"📥 Descargando '{archivo_rentas_seleccionado}'..."):
                 df_rentas = obtener_rentas(url_rentas_seleccionado)
                 if df_rentas is not None:
                     dataframes['rentas'] = df_rentas
