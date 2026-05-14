@@ -1,7 +1,7 @@
 import pandas as pd
 
 def descomponer_codigo(codigo, tipo='crc'):
-    """Descompone el código dependiendo de si es un CRC completo (23) o solo Lote (14)"""
+    """Descompone el código dependiendo de si es un CRC completo (23) o solo Lote (12)"""
     if pd.isna(codigo) or str(codigo).strip() == '':
         return None
         
@@ -12,8 +12,8 @@ def descomponer_codigo(codigo, tipo='crc'):
             return {
                 'Sector':   cod_str[6:8],   
                 'Manzana':  cod_str[8:11],  
-                'Lote':     cod_str[11:14], 
-                'Edifica':  cod_str[14:16], 
+                'Lote':     cod_str[11:12], 
+                'Edifica':  cod_str[12:16], 
                 'Entrada':  cod_str[16:18], 
                 'Piso':     cod_str[18:20], 
                 'Unidad':   cod_str[20:23], 
@@ -21,12 +21,12 @@ def descomponer_codigo(codigo, tipo='crc'):
         except: return None
     else:
         # CORRECCIÓN: Igual aquí, sin el .str
-        cod_str = str(codigo).strip().replace(".0", "").zfill(14)
+        cod_str = str(codigo).strip().replace(".0", "").zfill(12)
         try:
             return {
                 'Sector':   cod_str[6:8],   
                 'Manzana':  cod_str[8:11],  
-                'Lote':     cod_str[11:14],
+                'Lote':     cod_str[11:12],
                 'Edifica':  '', 'Entrada': '', 'Piso': '', 'Unidad': ''
             }
         except: return None
@@ -35,7 +35,7 @@ def validar(dfs):
     errores = []
     
     # ==============================================================
-    # MÓDULO EST-UA: Conteo de Unidades Administrativas (> 4)
+    # MÓDULO EST-UA: Conteo de Unidades Administrativas (> 2)
     # ==============================================================
     if 'unidades' in dfs:
         df_ua = dfs['unidades'].copy()
@@ -50,14 +50,14 @@ def validar(dfs):
             # Excluir las unidades que terminen en '999'
             df_ua_valid = df_ua_valid[df_ua_valid['CRC_Str'].str[-3:] != '999']
             
-            # Agrupar por Lote (los primeros 14 dígitos del CRC)
-            df_ua_valid['Agrupador_Lote'] = df_ua_valid['CRC_Str'].str[:14]
+            # Agrupar por Lote (los primeros 12 dígitos del CRC)
+            df_ua_valid['Agrupador_Lote'] = df_ua_valid['CRC_Str'].str[:12]
             conteo_ua = df_ua_valid.groupby('Agrupador_Lote').size()
             
-            # Identificar los que tienen más de 4 unidades
-            lotes_mas_de_4 = conteo_ua[conteo_ua > 4]
+            # Identificar los que tienen más de 2 unidades
+            lotes_mas_de_2 = conteo_ua[conteo_ua > 2]
             
-            for lote, cantidad in lotes_mas_de_4.items():
+            for lote, cantidad in lotes_mas_de_2.items():
                 componentes = descomponer_codigo(lote, tipo='lote')
                 msg = f"Aviso Estadístico: El lote registra una alta densidad ({cantidad} unidades administrativas, excluyendo áreas comunes 999)."
                 
@@ -88,7 +88,7 @@ def validar(dfs):
             df_inl_valid = df_inl.dropna(subset=[col_lote_inl])
             df_inl_valid = df_inl_valid[df_inl_valid[col_lote_inl].astype(str).str.strip() != '']
             
-            df_inl_valid['Lote_Str'] = df_inl_valid[col_lote_inl].astype(str).str.strip().str.replace(".0", "", regex=False).str.zfill(14)
+            df_inl_valid['Lote_Str'] = df_inl_valid[col_lote_inl].astype(str).str.strip().str.replace(".0", "", regex=False).str.zfill(12)
             
             # Agrupar y contar ingresos por cada lote
             conteo_inl = df_inl_valid.groupby('Lote_Str').size()
