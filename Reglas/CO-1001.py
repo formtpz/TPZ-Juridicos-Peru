@@ -21,7 +21,6 @@ def descomponer_crc(crc):
         return None
 
 def validar(dfs):
-    # Verificamos que el archivo de construcciones haya sido cargado
     if 'construcciones' not in dfs:
         return []
     
@@ -32,7 +31,6 @@ def validar(dfs):
     col_crc = 'Código de Referencia Catastral'
     col_piso = 'N° Piso'
     
-    # 1. Validar columnas estructurales
     if col_crc not in df.columns or col_piso not in df.columns:
         errores.append({
             'Nombre de la Regla': nombre_regla,
@@ -40,54 +38,46 @@ def validar(dfs):
         })
         return errores
 
-    # 2. Limpiar datos vacíos
     df_valid = df.dropna(subset=[col_crc])
     df_valid = df_valid[df_valid[col_crc].astype(str).str.strip() != '']
     
-    # 3. Agrupar la información por cada Código de Referencia Catastral
-    agrupado = df_valid.groupby(col_crc)
+    # --- CORRECCIÓN CLAVE ---
+    # Convertimos a string de 23 dígitos y extraemos hasta la Edificación (dígito 16)
+    df_valid['CRC_Str'] = df_valid[col_crc].astype(str).str.strip().str.replace(".0", "", regex=False).str.zfill(23)
+    df_valid['Agrupador_Edifica'] = df_valid['CRC_Str'].str[:16]
     
-    for crc, grupo in agrupado:
-        # Extraer todos los pisos registrados para este predio
+    # Ahora agrupamos por el edificio base, no por el CRC completo
+    agrupado = df_valid.groupby('Agrupador_Edifica')
+    
+    for agrupador, grupo in agrupado:
         pisos_raw = grupo[col_piso].dropna().astype(str).str.strip()
         pisos_numericos = []
         
-        # 4. Convertir a enteros para evaluar matemáticamente
         for p in pisos_raw:
             try:
-                # Se usa float primero para manejar casos donde Excel exporte "1.0" en vez de "1"
                 num = int(float(p))
                 pisos_numericos.append(num)
             except ValueError:
-                # Si el campo tiene texto (ej. "Sótano", "Azotea"), se ignora para el cálculo de consecutividad numérica
                 pass 
                 
         if not pisos_numericos:
             continue
             
-        # Extraer pisos únicos y ordenarlos de menor a mayor
-        # Ej: [1, 1, 2, 4] -> set elimina duplicados -> [1, 2, 4]
         pisos_unicos = sorted(list(set(pisos_numericos)))
-        
         error_msg = None
         
-        # 5. Condición A: Debe empezar siempre en 1
         if pisos_unicos[0] != 1:
             error_msg = f"El primer piso registrado es {pisos_unicos[0]}, pero la numeración siempre debe empezar en 1. (Pisos encontrados: {pisos_unicos})"
         else:
-            # 6. Condición B: Deben ser consecutivos
-            # Compara la lista real con una lista teórica ideal (ej: [1,2,3,4])
             rango_esperado = list(range(1, max(pisos_unicos) + 1))
-            
             if pisos_unicos != rango_esperado:
-                # Identifica cuáles pisos exactos faltan para el mensaje de error
                 faltantes = list(set(rango_esperado) - set(pisos_unicos))
                 faltantes.sort()
                 error_msg = f"La numeración de pisos no es consecutiva. Faltan los pisos: {faltantes}. (Pisos encontrados: {pisos_unicos})"
                 
-        # 7. Construir reporte si hay error
         if error_msg:
-            componentes = descomponer_crc(crc)
+            primer_crc_del_grupo = grupo[col_crc].iloc[0]
+            componentes = descomponer_crc(primer_crc_del_grupo)
             
             if componentes:
                 if componentes['Unidad'] == '999':
@@ -99,15 +89,15 @@ def validar(dfs):
                     'Manzana':  componentes['Manzana'],
                     'Lote':     componentes['Lote'],
                     'Edifica':  componentes['Edifica'],
-                    'Entrada':  componentes['Entrada'],
-                    'Piso':     componentes['Piso'], 
-                    'Unidad':   componentes['Unidad'],
+                    'Entrada':  '', # Se dejan vacíos porque el error es del edificio general
+                    'Piso':     '', 
+                    'Unidad':   '',
                     'Descripción del Error': error_msg
                 })
             else:
                 errores.append({
                     'Nombre de la Regla': nombre_regla,
-                    'Código del Predio (CRC)': crc,
+                    'Código del Predio (CRC)': primer_crc_del_grupo,
                     'Descripción del Error': error_msg
                 })
 
