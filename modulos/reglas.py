@@ -146,7 +146,7 @@ def render():
         dataframes = {}
         
         # Lectura de DataFrames locales
-        with st.spinner("Procesando insumos locales en memoria..."):
+        with st.spinner("Procesando insumos..."):
             try:
                 if archivo_unidades: dataframes['unidades'] = pd.read_excel(archivo_unidades)
                 if archivo_ingresos: dataframes['ingresos'] = pd.read_excel(archivo_ingresos)
@@ -172,7 +172,7 @@ def render():
 
         # Ejecutar reglas
         st.markdown("---")
-        st.subheader("⚙️ Procesando motor de reglas...")
+        st.subheader("⚙️ Procesando reglas...")
         with st.spinner("Ejecutando validaciones catastrales..."):
             lista_errores = cargar_y_ejecutar_reglas(dataframes)
 
