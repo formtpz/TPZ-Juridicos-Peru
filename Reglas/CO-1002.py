@@ -50,8 +50,11 @@ def validar(dfs):
     # Descartamos filas donde la fecha o el piso quedaron nulos tras la conversión
     df_valid = df_valid.dropna(subset=['Fecha_Format'])
     
-    # 3. Agrupamos por CRC
-    agrupado = df_valid.groupby(col_crc)
+    # 3. Agrupamos cortando hasta la Edificación (dígito 16)
+    df_valid['CRC_Str'] = df_valid[col_crc].astype(str).str.strip().str.replace(".0", "", regex=False).str.zfill(23)
+    df_valid['Agrupador_Edifica'] = df_valid['CRC_Str'].str[:16]
+    
+    agrupado = df_valid.groupby('Agrupador_Edifica')
     
     for crc, grupo in agrupado:
         diccionario_pisos = {}
