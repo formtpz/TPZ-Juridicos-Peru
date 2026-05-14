@@ -33,7 +33,7 @@ def validar(dfs):
     errores = []
     
     # ==============================================================
-    # MÓDULO EST-UA: Conteo de Unidades Administrativas (> 5)
+    # MÓDULO EST-UA: Conteo de Unidades Administrativas (> 4)
     # ==============================================================
     if 'unidades' in dfs:
         df_ua = dfs['unidades'].copy()
@@ -54,10 +54,10 @@ def validar(dfs):
             df_ua_valid['Agrupador_Lote'] = df_ua_valid['CRC_Str'].str[:14]
             conteo_ua = df_ua_valid.groupby('Agrupador_Lote').size()
             
-            # Identificar los que tienen más de 5 unidades
-            lotes_mas_de_5 = conteo_ua[conteo_ua > 5]
+            # Identificar los que tienen más de 4 unidades
+            lotes_mas_de_4 = conteo_ua[conteo_ua > 4]
             
-            for lote, cantidad in lotes_mas_de_5.items():
+            for lote, cantidad in lotes_mas_de_4.items():
                 componentes = descomponer_codigo(lote, tipo='lote')
                 msg = f"Aviso Estadístico: El lote registra una alta densidad ({cantidad} unidades administrativas, excluyendo áreas comunes 999)."
                 
