@@ -8,7 +8,7 @@ from datetime import datetime
 from permisos import validar_acceso
 
 # ======================================================
-# Configuración del repositorio GitHub (PARA ARCHIVOS EN NUBE) 
+# Configuración del repositorio GitHub (PARA ARCHIVOS EN NUBE)
 # ======================================================
 GITHUB_OWNER = "formtpz"          
 GITHUB_REPO = "TPZ-Juridicos-Peru"              
@@ -19,40 +19,62 @@ RENTAS_FOLDER = "Rentas_resumidos"
 REGLAS_DIR = "Reglas" 
 
 # ======================================================
-# LISTA GLOBAL DE MUNICIPIOS
+# Funciones para obtener RENTAS desde GitHub (Privado)
 # ======================================================
-MUNICIPIOS = [
-    "Chorrillos",
-    "San Juan de Miraflores",
-    "Villa El Salvador"
-]
-
-# ======================================================
-# Funciones de descarga desde GitHub
-# ======================================================
-def obtener_rentas(municipio):
+@st.cache_data(ttl=300)
+def obtener_lista_rentas():
     """
-    Descarga el archivo de rentas correspondiente. 
-    El mapeo de qué archivo le toca a cada municipio se maneja internamente aquí.
+    Obtiene la lista de archivos Excel del directorio de rentas en GitHub.
+    Usa el Token de acceso para repositorios privados.
     """
-    # Mapeo interno: El usuario no interactúa con estos nombres, solo el código.
-    archivos_por_municipio = {
-        "Chorrillos": "RENTAS_CHORRILLOS_2025_RESUMEN.xlsx",
-        "San Juan de Miraflores": "RENTAS_SJM_2025_RESUMEN.xlsx",
-        "Villa El Salvador": "RENTAS_VES_2025_RESUMEN.xlsx"
-    }
+    url_api = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/contents/{RENTAS_FOLDER}?ref={GITHUB_BRANCH}"
     
-    nombre_archivo = archivos_por_municipio.get(municipio)
+    headers = {"Accept": "application/vnd.github.v3+json"}
     
-    if not nombre_archivo:
-        return None
-        
-    url_raw = f"https://raw.githubusercontent.com/{GITHUB_OWNER}/{GITHUB_REPO}/{GITHUB_BRANCH}/{RENTAS_FOLDER}/{nombre_archivo}"
-    
+    # Inyectar Token de Seguridad
     try:
-        return pd.read_excel(url_raw)
+        token = st.secrets["GITHUB_TOKEN"]
+        headers["Authorization"] = f"token {token}"
+    except Exception:
+        st.error("⚠️ Falta configurar el GITHUB_TOKEN en los secretos de Streamlit.")
+        return []
+
+    try:
+        respuesta = requests.get(url_api, headers=headers)
+        if respuesta.status_code == 200:
+            archivos = respuesta.json()
+            return [
+                {"name": f["name"], "download_url": f["download_url"]}
+                for f in archivos
+                if f["name"].endswith(".xlsx") or f["name"].endswith(".xls")
+            ]
+        else:
+            st.error(f"Error al acceder a la carpeta de rentas en GitHub (código {respuesta.status_code}).")
+            return []
     except Exception as e:
-        st.warning(f"No se pudo cargar el archivo de rentas para {municipio}: {e}")
+        st.error(f"Error de conexión con GitHub: {e}")
+        return []
+
+def obtener_rentas(url_raw):
+    """
+    Descarga el archivo de rentas seleccionado usando el Token de seguridad.
+    """
+    headers = {}
+    try:
+        token = st.secrets["GITHUB_TOKEN"]
+        headers["Authorization"] = f"token {token}"
+    except Exception:
+        return None
+
+    try:
+        respuesta = requests.get(url_raw, headers=headers)
+        if respuesta.status_code == 200:
+            return pd.read_excel(BytesIO(respuesta.content))
+        else:
+            st.warning(f"No se pudo cargar el archivo de rentas (Error HTTP {respuesta.status_code}).")
+            return None
+    except Exception as e:
+        st.warning(f"Excepción al descargar el archivo de rentas: {e}")
         return None
 
 # ======================================================
@@ -103,15 +125,19 @@ def render():
 
     st.title("🔍 Validación Relacional de Insumos Catastrales")
     st.markdown("""
-    Selecciona el municipio a evaluar y sube los insumos requeridos. 
-    Las bases de datos externas (como Rentas) se conectarán automáticamente según tu selección.
+    Sube los archivos locales necesarios. El archivo de **Rentas** se selecciona y descarga 
+    automáticamente desde el repositorio seguro en la nube.
     """)
 
-    # 1. Selección de Municipio (Variable Global para todo el proceso)
-    municipio_seleccionado = st.selectbox(
-        "🏛️ Selecciona el Municipio",
-        options=MUNICIPIOS,
-        help="El municipio define los parámetros geográficos, normativos y las bases de datos externas a utilizar."
+    # 1. Obtener archivos de Rentas para el menú desplegable (Conectando a GitHub)
+    lista_rentas = obtener_lista_rentas()
+    nombres_rentas = [r["name"] for r in lista_rentas]
+
+    archivo_rentas_seleccionado = st.selectbox(
+        "📂 Selecciona el archivo de Rentas (Nube)",
+        options=nombres_rentas,
+        index=0 if nombres_rentas else None,
+        help="Elige la base de rentas contra la cual quieres cruzar la información."
     )
 
     st.markdown("---")
@@ -132,12 +158,9 @@ def render():
     if st.button("🚀 Ejecutar todas las validaciones", type="primary", use_container_width=True):
         
         if not archivo_unidades or not archivo_ingresos:
-            st.warning("⚠️ Recuerda que algunas reglas se omitirán si no subes todos los archivos que requieren.")
+            st.warning("⚠️ Recuerda que algunas reglas se omitirán si no subes todos los archivos correspondientes.")
             
         dataframes = {}
-        
-        # Guardamos el municipio en el diccionario de datos para que las reglas puedan leerlo
-        dataframes['municipio'] = municipio_seleccionado
         
         # Lectura de DataFrames locales
         with st.spinner("Procesando insumos locales en memoria..."):
@@ -150,19 +173,24 @@ def render():
                 st.error(f"Error al leer archivos locales: {e}")
                 return
 
-        # Descarga automática de archivos de la nube
-        with st.spinner(f"📥 Conectando con bases de datos de {municipio_seleccionado}..."):
-            df_rentas = obtener_rentas(municipio_seleccionado)
-            if df_rentas is not None:
-                dataframes['rentas'] = df_rentas
-                st.success(f"✅ Base de Rentas de {municipio_seleccionado} conectada.")
-            else:
-                st.warning("⚠️ No se pudo establecer conexión con la base de Rentas. La validación continuará, pero las reglas que requieran este cruce serán omitidas.")
+        # Descarga de Rentas si se seleccionó uno
+        if archivo_rentas_seleccionado:
+            url_rentas_seleccionado = next(r["download_url"] for r in lista_rentas if r["name"] == archivo_rentas_seleccionado)
+            
+            with st.spinner(f"📥 Descargando '{archivo_rentas_seleccionado}' de forma segura..."):
+                df_rentas = obtener_rentas(url_rentas_seleccionado)
+                if df_rentas is not None:
+                    dataframes['rentas'] = df_rentas
+                    st.success(f"✅ Archivo de Rentas conectado exitosamente.")
+                else:
+                    st.warning("⚠️ No se pudo establecer conexión con la base de Rentas. La validación continuará, pero las reglas relacionales serán omitidas.")
+        else:
+            st.info("No se seleccionó archivo de Rentas. Se omitirán las validaciones relacionales.")
 
         # Ejecutar reglas
         st.markdown("---")
-        st.subheader(f"⚙️ Analizando datos para {municipio_seleccionado}...")
-        with st.spinner("Ejecutando motor de reglas catastrales..."):
+        st.subheader("⚙️ Procesando motor de reglas...")
+        with st.spinner("Ejecutando validaciones catastrales..."):
             lista_errores = cargar_y_ejecutar_reglas(dataframes)
 
         # Generar Reporte
@@ -195,9 +223,10 @@ def render():
                 df_resumen_ordenado.to_excel(writer, index=False, sheet_name="Errores")
             output.seek(0)
 
-            # El nombre del archivo ahora incluye el municipio de forma dinámica
+            # Nombre dinámico usando el archivo de rentas que se eligió o una etiqueta general
+            nombre_etiqueta = archivo_rentas_seleccionado.replace('.xlsx', '') if archivo_rentas_seleccionado else "SinRentas"
             timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-            nombre_descarga = f"resumen_errores_{municipio_seleccionado.replace(' ', '_')}_{timestamp}.xlsx"
+            nombre_descarga = f"resumen_errores_{nombre_etiqueta}_{timestamp}.xlsx"
             
             st.download_button(
                 label="⬇️ Descargar reporte de errores",
