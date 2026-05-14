@@ -209,7 +209,7 @@ def render():
             # Nombre dinámico usando el archivo de rentas que se eligió o una etiqueta general
             nombre_etiqueta = archivo_rentas_seleccionado.replace('.xlsx', '') if archivo_rentas_seleccionado else "SinRentas"
             timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-            nombre_descarga = f"resumen_errores_{nombre_etiqueta}_{timestamp}.xlsx"
+            nombre_descarga = f"resumen_errores_validacion_{timestamp}.xlsx"
             
             st.download_button(
                 label="⬇️ Descargar reporte de errores",
