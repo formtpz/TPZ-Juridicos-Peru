@@ -47,7 +47,7 @@ def obtener_lista_rentas():
 
 def obtener_rentas(url_raw):
     """
-    Descarga el archivo de rentas seleccionado.
+    Cargando el archivo de rentas seleccionado.
     """
     try:
         respuesta = requests.get(url_raw)
