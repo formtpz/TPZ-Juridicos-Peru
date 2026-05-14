@@ -6,7 +6,8 @@ def descomponer_codigo(codigo, tipo='crc'):
         return None
         
     if tipo == 'crc':
-        cod_str = str(codigo).strip().str.replace(".0", "", regex=False).zfill(23)
+        # CORRECCIÓN: Se usa .replace() normal para strings de Python, sin el .str
+        cod_str = str(codigo).strip().replace(".0", "").zfill(23)
         try:
             return {
                 'Sector':   cod_str[6:8],   
@@ -19,7 +20,8 @@ def descomponer_codigo(codigo, tipo='crc'):
             }
         except: return None
     else:
-        cod_str = str(codigo).strip().str.replace(".0", "", regex=False).zfill(14)
+        # CORRECCIÓN: Igual aquí, sin el .str
+        cod_str = str(codigo).strip().replace(".0", "").zfill(14)
         try:
             return {
                 'Sector':   cod_str[6:8],   
@@ -40,14 +42,12 @@ def validar(dfs):
         col_crc_ua = 'Código de Referencia Catastral'
         
         if col_crc_ua in df_ua.columns:
-            # Limpiar datos vacíos
             df_ua_valid = df_ua.dropna(subset=[col_crc_ua])
             df_ua_valid = df_ua_valid[df_ua_valid[col_crc_ua].astype(str).str.strip() != '']
             
-            # Estandarizar a 23 dígitos
             df_ua_valid['CRC_Str'] = df_ua_valid[col_crc_ua].astype(str).str.strip().str.replace(".0", "", regex=False).str.zfill(23)
             
-            # Filtrar: Excluir las unidades que terminen en '999'
+            # Excluir las unidades que terminen en '999'
             df_ua_valid = df_ua_valid[df_ua_valid['CRC_Str'].str[-3:] != '999']
             
             # Agrupar por Lote (los primeros 14 dígitos del CRC)
@@ -85,11 +85,9 @@ def validar(dfs):
         col_lote_inl = 'Código del Lote'
         
         if col_lote_inl in df_inl.columns:
-            # Limpiar datos vacíos
             df_inl_valid = df_inl.dropna(subset=[col_lote_inl])
             df_inl_valid = df_inl_valid[df_inl_valid[col_lote_inl].astype(str).str.strip() != '']
             
-            # Estandarizar a 14 dígitos
             df_inl_valid['Lote_Str'] = df_inl_valid[col_lote_inl].astype(str).str.strip().str.replace(".0", "", regex=False).str.zfill(14)
             
             # Agrupar y contar ingresos por cada lote
