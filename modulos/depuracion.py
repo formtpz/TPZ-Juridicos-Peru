@@ -1,20 +1,8 @@
 # modulos/depuracion.py
 import streamlit as st
 import pandas as pd
-from sqlalchemy import create_engine, text
 from io import BytesIO
 from permisos import validar_acceso
-
-# --- Credenciales fijas ---
-USER = "gct_1"
-PASSWORD = "5UWJpWHxsBv091t"
-HOST = "192.168.4.9"
-PORT = "5432"
-DB_NAME = "COFOPRI"
-
-def conectar_bd():
-    url = f"postgresql://{USER}:{PASSWORD}@{HOST}:{PORT}/{DB_NAME}"
-    return create_engine(url)
 
 def parse_manzanas_input(texto: str):
     if not texto or not texto.strip():
@@ -42,7 +30,7 @@ def render():
     st.title("🧹 Depuración de Datos - Catastro")
 
     # --- Selector de modo ---
-    modo = st.radio("Selecciona el modo de filtrado:", ["Sector/Manzana", "Polígono (BD)"])
+    modo = st.radio("Selecciona el modo de filtrado:", ["Sector/Manzana", "Polígono (Excel)"])
 
     # --- Subida múltiple de archivos ---
     archivo_list = st.file_uploader(
@@ -58,8 +46,15 @@ def render():
 
     # --- Configuración extra para modo Polígono ---
     poligono = None
-    if modo == "Polígono (BD)":
+    if modo == "Polígono (Excel)":
         poligono = st.text_input("Ingrese el código de polígono (ej: SJM-04)")
+
+        # Cargar entregas desde Excel del repositorio
+        try:
+            df_entregas = pd.read_excel("Rentas_resumidos/Entregas_a_cofopri.xlsx", engine="openpyxl")
+        except Exception as e:
+            st.error(f"Error al cargar Entregas_a_cofopri.xlsx: {e}")
+            return
 
     # --- Procesar cada archivo en lote ---
     for archivo in archivo_list:
@@ -103,7 +98,6 @@ def render():
                     mask = pd.Series([False] * len(df), index=df.index)
                     for sector in sectores_seleccionados:
                         sector_int = int(sector)
-                        manzanas_permitidas = parse_manzanas_input("")  # aquí podrías extender con inputs
                         mask_sector = (df["Sector_int"] == sector_int)
                         mask = mask | mask_sector
 
@@ -124,27 +118,20 @@ def render():
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     )
 
-            # --- Modo 2: Polígono (BD) ---
+            # --- Modo 2: Polígono (Excel) ---
             else:
                 if not poligono:
                     st.warning("⚠️ Ingrese un polígono para aplicar el filtro.")
                     continue
 
-                engine = conectar_bd()
-                query = text("""
-                    SELECT concat_sec
-                    FROM public.entregas_a_cofopri
-                    WHERE poligono = :poligono
-                """)
-                with engine.connect() as conn:
-                    df_bd = pd.read_sql(query, conn, params={"poligono": poligono})
+                df_entregas_pol = df_entregas[df_entregas['poligono'] == poligono]
 
-                if df_bd.empty:
-                    st.warning(f"⚠️ No se encontraron registros en la BD para el polígono {poligono}.")
+                if df_entregas_pol.empty:
+                    st.warning(f"⚠️ No se encontraron registros en Entregas_a_cofopri.xlsx para el polígono {poligono}.")
                     continue
 
                 df["SecManz"] = df[col_cat].apply(lambda c: c[6:11] if len(c) >= 11 else None)
-                df_filtrado = df[df["SecManz"].isin(df_bd["concat_sec"])].copy()
+                df_filtrado = df[df["SecManz"].isin(df_entregas_pol["concat_sec"])].copy()
 
                 st.write(f"**Filas encontradas:** {len(df_filtrado)}")
                 st.dataframe(df_filtrado.head(20), use_container_width=True)
