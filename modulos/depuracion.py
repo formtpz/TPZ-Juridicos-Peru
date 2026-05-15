@@ -46,6 +46,7 @@ def render():
 
     # --- Configuración extra para modo Polígono ---
     poligono = None
+    df_entregas = None
     if modo == "Polígono (Excel)":
         poligono = st.text_input("Ingrese el código de polígono (ej: SJM-04)")
 
@@ -130,8 +131,13 @@ def render():
                     st.warning(f"⚠️ No se encontraron registros en Entregas_a_cofopri.xlsx para el polígono {poligono}.")
                     continue
 
-                df["SecManz"] = df[col_cat].apply(lambda c: c[6:11] if len(c) >= 11 else None)
-                df_filtrado = df[df["SecManz"].isin(df_entregas_pol["concat_sec"])].copy()
+                # Extraer los 5 dígitos (posiciones 7–11) del CRC
+                df["SecManz"] = df[col_cat].apply(
+                    lambda c: str(c).strip().zfill(23)[6:11] if pd.notna(c) else None
+                )
+
+                # Comparar contra concat_sec del Excel de entregas filtrado por polígono
+                df_filtrado = df[df["SecManz"].isin(df_entregas_pol["concat_sec"].astype(str))].copy()
 
                 st.write(f"**Filas encontradas:** {len(df_filtrado)}")
                 st.dataframe(df_filtrado.head(20), use_container_width=True)
