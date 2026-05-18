@@ -231,7 +231,7 @@ def render():
             # Nombre dinámico usando el archivo de rentas o etiqueta general
             nombre_etiqueta = archivo_rentas_seleccionado.replace('.xlsx', '') if archivo_rentas_seleccionado else "SinRentas"
             timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-            nombre_descarga = f"resumen_auditoria_{nombre_etiqueta}_{timestamp}.xlsx"
+            nombre_descarga = f"validacion_{timestamp}.xlsx"
             
             st.download_button(
                 label="⬇️ Descargar reporte unificado (Múltiples Hojas)",
