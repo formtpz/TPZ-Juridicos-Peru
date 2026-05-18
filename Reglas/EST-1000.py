@@ -45,8 +45,8 @@ def validar(dfs):
             
             df_ua_valid['CRC_Str'] = df_ua_valid[col_crc_ua].astype(str).str.strip().str.replace(".0", "", regex=False).str.zfill(23)
             
-            # Excluir las unidades que terminen en '999'
-            df_ua_valid = df_ua_valid[df_ua_valid['CRC_Str'].str[-3:] != '999']
+            # Excluir los bienes comunes (posiciones 21, 22 y 23 exactas)
+            df_ua_valid = df_ua_valid[df_ua_valid['CRC_Str'].str[20:23] != '999']
             
             # Agrupar por Lote (los primeros 14 dígitos del CRC)
             df_ua_valid['Agrupador_Lote'] = df_ua_valid['CRC_Str'].str[:14]
