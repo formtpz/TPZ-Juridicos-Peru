@@ -19,7 +19,6 @@ def descomponer_codigo(codigo, tipo='crc'):
             }
         except: return None
     else:
-        # CORRECCIÓN 1: Vuelve a 14 para que no se corte el string antes de llegar al Lote
         cod_str = str(codigo).strip().replace(".0", "").zfill(14)
         try:
             return {
@@ -34,7 +33,7 @@ def validar(dfs):
     errores = []
     
     # ==============================================================
-    # MÓDULO EST-UA: Conteo de Unidades Administrativas (> 2)
+    # MÓDULO EST-UA: Conteo total de Unidades Administrativas
     # ==============================================================
     if 'unidades' in dfs:
         df_ua = dfs['unidades'].copy()
@@ -49,16 +48,15 @@ def validar(dfs):
             # Excluir las unidades que terminen en '999'
             df_ua_valid = df_ua_valid[df_ua_valid['CRC_Str'].str[-3:] != '999']
             
-            # CORRECCIÓN 2: Vuelve a 14 para agrupar tomando la manzana y el lote completos
+            # Agrupar por Lote (los primeros 14 dígitos del CRC)
             df_ua_valid['Agrupador_Lote'] = df_ua_valid['CRC_Str'].str[:14]
             conteo_ua = df_ua_valid.groupby('Agrupador_Lote').size()
             
-            # Identificar los que tienen más de 2 unidades
-            lotes_mas_de_2 = conteo_ua[conteo_ua > 2]
-            
-            for lote, cantidad in lotes_mas_de_2.items():
+            # Se iteran TODOS los lotes sin filtrar por cantidad
+            for lote, cantidad in conteo_ua.items():
                 componentes = descomponer_codigo(lote, tipo='lote')
-                msg = f"Aviso Estadístico: El lote registra una alta densidad ({cantidad} unidades administrativas, excluyendo áreas comunes 999)."
+                # Asignamos estrictamente el valor numérico
+                msg = str(cantidad)
                 
                 if componentes:
                     errores.append({
@@ -77,7 +75,7 @@ def validar(dfs):
                     })
 
     # ==============================================================
-    # MÓDULO EST-INL: Conteo de Ingresos por Lote (> 1)
+    # MÓDULO EST-INL: Conteo total de Ingresos por Lote
     # ==============================================================
     if 'ingresos_lote' in dfs:
         df_inl = dfs['ingresos_lote'].copy()
@@ -87,18 +85,16 @@ def validar(dfs):
             df_inl_valid = df_inl.dropna(subset=[col_lote_inl])
             df_inl_valid = df_inl_valid[df_inl_valid[col_lote_inl].astype(str).str.strip() != '']
             
-            # CORRECCIÓN 3: Vuelve a 14 para mantener el formato completo
             df_inl_valid['Lote_Str'] = df_inl_valid[col_lote_inl].astype(str).str.strip().str.replace(".0", "", regex=False).str.zfill(14)
             
             # Agrupar y contar ingresos por cada lote
             conteo_inl = df_inl_valid.groupby('Lote_Str').size()
             
-            # Identificar los que tienen más de 1 ingreso
-            lotes_mas_de_1 = conteo_inl[conteo_inl > 1]
-            
-            for lote, cantidad in lotes_mas_de_1.items():
+            # Se iteran TODOS los lotes sin filtrar por cantidad
+            for lote, cantidad in conteo_inl.items():
                 componentes = descomponer_codigo(lote, tipo='lote')
-                msg = f"Aviso Estadístico: El lote registra múltiples accesos ({cantidad} ingresos reportados)."
+                # Asignamos estrictamente el valor numérico
+                msg = str(cantidad)
                 
                 if componentes:
                     errores.append({
