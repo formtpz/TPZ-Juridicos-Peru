@@ -172,7 +172,7 @@ def render():
 
         # Ejecutar reglas
         st.markdown("---")
-        st.subheader("⚙️ Procesando reglas...")
+        st.subheader("⚙️ Procesando motor de reglas...")
         with st.spinner("Ejecutando validaciones catastrales..."):
             lista_errores = cargar_y_ejecutar_reglas(dataframes)
 
@@ -197,26 +197,48 @@ def render():
             cols_orden_validas = [col for col in columnas_para_ordenar if col in df_resumen_ordenado.columns]
             df_resumen_ordenado = df_resumen_ordenado.sort_values(by=cols_orden_validas, ascending=True)
 
-            st.subheader("📊 Resultado de la validación")
-            st.error(f"⚠️ Se encontraron **{len(df_resumen_ordenado)} inconsistencias**.")
-            st.dataframe(df_resumen_ordenado, use_container_width=True)
+            # ==============================================================
+            # NUEVO SEPARADOR DE HOJAS: ERRORES VS ESTADÍSTICAS
+            # ==============================================================
+            # Detecta cualquier regla que contenga la palabra "EST" en su nombre
+            filtro_est = df_resumen_ordenado['Nombre de la Regla'].astype(str).str.contains('EST', na=False)
+            
+            df_errores_puros = df_resumen_ordenado[~filtro_est]
+            df_estadisticas_puras = df_resumen_ordenado[filtro_est]
 
+            # Despliegue en la interfaz de Streamlit (Separados para claridad visual)
+            st.subheader("📊 Resumen del Análisis Ejecutado")
+            
+            if not df_errores_puros.empty:
+                st.error(f"⚠️ Se detectaron **{len(df_errores_puros)} inconsistencias** de validación estructural.")
+                st.dataframe(df_errores_puros, use_container_width=True)
+            else:
+                st.success("✅ ¡Excelente! Cero inconsistencias encontradas en los archivos.")
+
+            if not df_estadisticas_puras.empty:
+                st.info(f"📈 Se extrajeron **{len(df_estadisticas_puras)} registros estadísticos** generales.")
+                st.dataframe(df_estadisticas_puras, use_container_width=True)
+
+            # Generación del archivo Excel multibook
             output = BytesIO()
             with pd.ExcelWriter(output, engine="openpyxl") as writer:
-                df_resumen_ordenado.to_excel(writer, index=False, sheet_name="Errores")
+                # Hoja 1: Errores estructurales de consistencia
+                df_errores_puros.to_excel(writer, index=False, sheet_name="Errores")
+                # Hoja 2: Conteo cuantitativo puro para análisis estadístico
+                df_estadisticas_puras.to_excel(writer, index=False, sheet_name="Estadísticas")
             output.seek(0)
 
-            # Nombre dinámico usando el archivo de rentas que se eligió o una etiqueta general
+            # Nombre dinámico usando el archivo de rentas o etiqueta general
             nombre_etiqueta = archivo_rentas_seleccionado.replace('.xlsx', '') if archivo_rentas_seleccionado else "SinRentas"
             timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-            nombre_descarga = f"resumen_errores_validacion_{timestamp}.xlsx"
+            nombre_descarga = f"resumen_auditoria_{nombre_etiqueta}_{timestamp}.xlsx"
             
             st.download_button(
-                label="⬇️ Descargar reporte de errores",
+                label="⬇️ Descargar reporte unificado (Múltiples Hojas)",
                 data=output,
                 file_name=nombre_descarga,
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 type="primary"
             )
         else:
-            st.success("✅ ¡Felicidades! No se encontraron errores en las validaciones ejecutadas.")
+            st.success("✅ ¡Felicidades! No se encontraron datos ni errores en las validaciones ejecutadas.")
