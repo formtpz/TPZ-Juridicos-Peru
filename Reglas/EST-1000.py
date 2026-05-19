@@ -72,13 +72,13 @@ def validar(dfs):
                         'Manzana':  componentes['Manzana'],
                         'Lote':     componentes['Lote'],
                         'Edifica':  '', 'Entrada': '', 'Piso': '', 'Unidad': '',
-                        'Cantidad por lote': msg
+                        'Descripción del Error': msg
                     })
                 else:
                     errores.append({
                         'Nombre de la Regla': 'EST-UA',
                         'Código del Predio (CRC)': lote,
-                        'Cantidad por lote': msg
+                        'Descripción del Error': msg
                     })
 
     # ==============================================================
@@ -110,13 +110,13 @@ def validar(dfs):
                         'Manzana':  componentes['Manzana'],
                         'Lote':     componentes['Lote'],
                         'Edifica':  '', 'Entrada': '', 'Piso': '', 'Unidad': '',
-                        'Cantidad por lote': msg
+                        'Descripción del Error': msg
                     })
                 else:
                     errores.append({
                         'Nombre de la Regla': 'EST-INL',
                         'Código del Predio (CRC)': lote,
-                        'Cantidad por lote': msg
+                        'Descripción del Error': msg
                     })
 
     return errores
