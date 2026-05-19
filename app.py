@@ -6,7 +6,7 @@ from permisos import PERMISOS_POR_PERFIL
 # CONFIGURACIÓN GENERAL
 # =========================
 st.set_page_config(
-    page_title="Sistema de Reportes",
+    page_title="Procesamiento de Reportes COFOPRI",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded"
