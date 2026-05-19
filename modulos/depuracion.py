@@ -137,6 +137,10 @@ def render():
                     lambda c: str(c).strip().zfill(23)[6:11] if pd.notna(c) else None
                 )
 
+                # Convertir ambas columnas a string para evitar error de tipos
+                df["SecManz"] = df["SecManz"].astype(str).str.strip()
+                df_entregas_sel["concat_sec"] = df_entregas_sel["concat_sec"].astype(str).str.strip()
+
                 # Join con entregas seleccionadas
                 df_filtrado = df.merge(
                     df_entregas_sel[["concat_sec", "poligono"]],
@@ -164,4 +168,3 @@ def render():
                 )
 
         except Exception as e:
-            st.error(f"Error al procesar {archivo.name}: {e}")
