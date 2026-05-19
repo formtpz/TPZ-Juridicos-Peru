@@ -136,10 +136,15 @@ def render():
                     st.warning(f"⚠️ No se encontraron registros en Entregas_a_cofopri.xlsx para los polígonos seleccionados.")
                     continue
 
-                # Extraer los 5 dígitos (posiciones 7–11) del código (CRC o Código del Lote)
-                df["SecManz"] = df[col_cat].apply(
-                    lambda c: str(c).strip().zfill(23)[6:11] if pd.notna(c) else None
-                )
+                # Extraer los 5 dígitos (posiciones 7–11) según la columna usada
+                if "referencia catastral" in col_cat.lower():
+                    df["SecManz"] = df[col_cat].apply(
+                        lambda c: str(c).strip().zfill(23)[6:11] if pd.notna(c) else None
+                    )
+                else:  # Código del Lote
+                    df["SecManz"] = df[col_cat].apply(
+                        lambda c: str(c).strip()[6:11] if pd.notna(c) else None
+                    )
 
                 # Convertir ambas columnas a string para evitar error de tipos
                 df["SecManz"] = df["SecManz"].astype(str).str.strip()
@@ -173,4 +178,3 @@ def render():
 
         except Exception as e:
             st.error(f"Error al procesar {archivo.name}: {e}")
-
