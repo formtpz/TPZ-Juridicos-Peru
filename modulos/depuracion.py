@@ -45,17 +45,18 @@ def render():
         return
 
     # --- Configuración extra para modo Polígono ---
-    poligono = None
+    poligonos_sel = None
     df_entregas = None
     if modo == "Polígono (Excel)":
-        poligono = st.text_input("Ingrese el código de polígono (ej: SJM-04)")
-
-        # Cargar entregas desde Excel del repositorio
         try:
             df_entregas = pd.read_excel("Rentas_resumidos/Entregas_a_cofopri.xlsx", engine="openpyxl")
         except Exception as e:
             st.error(f"Error al cargar Entregas_a_cofopri.xlsx: {e}")
             return
+
+        # Selección múltiple de polígonos disponibles
+        poligonos_disp = sorted(df_entregas['poligono'].dropna().unique())
+        poligonos_sel = st.multiselect("Seleccione uno o varios polígonos:", poligonos_disp)
 
     # --- Procesar cada archivo en lote ---
     for archivo in archivo_list:
@@ -121,14 +122,14 @@ def render():
 
             # --- Modo 2: Polígono (Excel) ---
             else:
-                if not poligono:
-                    st.warning("⚠️ Ingrese un polígono para aplicar el filtro.")
+                if not poligonos_sel:
+                    st.warning("⚠️ Seleccione al menos un polígono para aplicar el filtro.")
                     continue
 
-                df_entregas_pol = df_entregas[df_entregas['poligono'] == poligono]
+                df_entregas_sel = df_entregas[df_entregas['poligono'].isin(poligonos_sel)]
 
-                if df_entregas_pol.empty:
-                    st.warning(f"⚠️ No se encontraron registros en Entregas_a_cofopri.xlsx para el polígono {poligono}.")
+                if df_entregas_sel.empty:
+                    st.warning(f"⚠️ No se encontraron registros en Entregas_a_cofopri.xlsx para los polígonos seleccionados.")
                     continue
 
                 # Extraer los 5 dígitos (posiciones 7–11) del CRC
@@ -136,8 +137,16 @@ def render():
                     lambda c: str(c).strip().zfill(23)[6:11] if pd.notna(c) else None
                 )
 
-                # Comparar contra concat_sec del Excel de entregas filtrado por polígono
-                df_filtrado = df[df["SecManz"].isin(df_entregas_pol["concat_sec"].astype(str))].copy()
+                # Join con entregas seleccionadas
+                df_filtrado = df.merge(
+                    df_entregas_sel[["concat_sec", "poligono"]],
+                    left_on="SecManz",
+                    right_on="concat_sec",
+                    how="inner"
+                )
+
+                # Agregar columna Poligono
+                df_filtrado.rename(columns={"poligono": "Poligono"}, inplace=True)
 
                 st.write(f"**Filas encontradas:** {len(df_filtrado)}")
                 st.dataframe(df_filtrado.head(20), use_container_width=True)
@@ -150,7 +159,7 @@ def render():
                 st.download_button(
                     label=f"⬇️ Descargar resultado ({archivo.name})",
                     data=output,
-                    file_name=f"Filtrado_{poligono}_{archivo.name}",
+                    file_name=f"Filtrado_{'_'.join(poligonos_sel)}_{archivo.name}",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
 
