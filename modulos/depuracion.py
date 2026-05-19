@@ -65,19 +65,23 @@ def render():
         try:
             df = pd.read_excel(archivo, engine="openpyxl")
 
-            # Buscar columna catastral
+            # Buscar columna catastral o columna Código del Lote
             col_cat = None
             for col in df.columns:
                 if "código de referencia catastral" in col.lower():
                     col_cat = col
                     break
+                if "código del lote" in col.lower():
+                    col_cat = col
+                    break
+
             if not col_cat:
-                st.error("❌ No se encontró la columna 'Código de Referencia Catastral'.")
+                st.error("❌ No se encontró la columna 'Código de Referencia Catastral' ni 'Código del Lote'.")
                 continue
 
             df[col_cat] = df[col_cat].astype(str).str.strip()
 
-            # Extracción sector/manzana/lote
+            # Extracción sector/manzana/lote (aplica igual para ambas columnas)
             df["Sector"] = df[col_cat].apply(lambda c: c[6:8] if len(c) >= 8 else None)
             df["Manzana"] = df[col_cat].apply(lambda c: c[8:11] if len(c) >= 11 else None)
             df["Lote"] = df[col_cat].apply(lambda c: c[11:14] if len(c) >= 14 else None)
@@ -132,7 +136,7 @@ def render():
                     st.warning(f"⚠️ No se encontraron registros en Entregas_a_cofopri.xlsx para los polígonos seleccionados.")
                     continue
 
-                # Extraer los 5 dígitos (posiciones 7–11) del CRC
+                # Extraer los 5 dígitos (posiciones 7–11) del código (CRC o Código del Lote)
                 df["SecManz"] = df[col_cat].apply(
                     lambda c: str(c).strip().zfill(23)[6:11] if pd.notna(c) else None
                 )
@@ -169,3 +173,4 @@ def render():
 
         except Exception as e:
             st.error(f"Error al procesar {archivo.name}: {e}")
+
