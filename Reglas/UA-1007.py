@@ -53,32 +53,18 @@ def validar(dfs):
     df_temp['Rentas_Clean'] = df_temp[col_rentas].fillna('').astype(str).str.replace(' ', '')
 
     # 3. Lógica de la regla
-    # A) Validar caracteres inválidos (todo lo que NO sea un número de 0-9 o una coma)
+    # Validar caracteres inválidos (todo lo que NO sea un número de 0-9 o una coma)
     mascara_caracteres = (df_temp['Rentas_Clean'] != '') & df_temp['Rentas_Clean'].str.contains(r'[^0-9,]', regex=True)
     
-    # B) Validar duplicados (ignorando los vacíos)
-    # keep=False marca TODAS las apariciones del dato duplicado como True
-    mascara_duplicados = (df_temp['Rentas_Clean'] != '') & df_temp.duplicated(subset=['Rentas_Clean'], keep=False)
-    
-    # Unimos ambas máscaras
-    filas_con_error = df_temp[mascara_caracteres | mascara_duplicados]
+    filas_con_error = df_temp[mascara_caracteres]
     
     # 4. Construir el reporte
     for index, fila in filas_con_error.iterrows():
         crc = fila[col_crc]
         valor_original = fila[col_rentas]
         
-        # Identificar los errores específicos para dar un mensaje claro
-        es_invalido = mascara_caracteres.loc[index]
-        es_duplicado = mascara_duplicados.loc[index]
-        
-        mensajes = []
-        if es_invalido:
-            mensajes.append("Contiene caracteres alfanuméricos o inválidos, solo se admiten números.")
-        if es_duplicado:
-            mensajes.append("Es un código duplicado (ya está asignado a otro predio).")
-            
-        desc_error = f"Inconsistencia en el Código de Rentas ('{valor_original}'): " + " ".join(mensajes)
+        # Mensaje de error simplificado y directo
+        desc_error = f"Inconsistencia en el Código de Rentas ('{valor_original}'): Contiene caracteres alfanuméricos o inválidos, solo se admiten números y comas."
         
         componentes = descomponer_crc(crc)
         
