@@ -37,15 +37,22 @@ def validar(dfs):
     # ==============================================================
     if 'unidades' in dfs:
         df_ua = dfs['unidades'].copy()
-        col_crc_ua = 'Código de Referencia Catastral'
         
-        if col_crc_ua in df_ua.columns:
+        # --- DETECTOR DINÁMICO DE COLUMNA DE CRC ---
+        col_crc_ua = None
+        if 'Código de Referencia Catastral' in df_ua.columns:
+            col_crc_ua = 'Código de Referencia Catastral'
+        elif 'codigoRefCat' in df_ua.columns:
+            col_crc_ua = 'codigoRefCat'
+            
+        # Si encontró alguna de las dos columnas, procede con el cálculo
+        if col_crc_ua is not None:
             df_ua_valid = df_ua.dropna(subset=[col_crc_ua])
             df_ua_valid = df_ua_valid[df_ua_valid[col_crc_ua].astype(str).str.strip() != '']
             
             df_ua_valid['CRC_Str'] = df_ua_valid[col_crc_ua].astype(str).str.strip().str.replace(".0", "", regex=False).str.zfill(23)
             
-            # Excluir los bienes comunes (posiciones 21, 22 y 23 exactas)
+            # Excluir los bienes comunes (posiciones exactas 21, 22 y 23)
             df_ua_valid = df_ua_valid[df_ua_valid['CRC_Str'].str[20:23] != '999']
             
             # Agrupar por Lote (los primeros 14 dígitos del CRC)
