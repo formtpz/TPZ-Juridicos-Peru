@@ -14,7 +14,7 @@ def login_usuario(usuario, password):
             puesto,
             supervisor,
             horario
-        FROM usuarios
+        FROM public.usuarios
         WHERE usuario = %s
           AND contraseña = %s
           AND LOWER(estado) = 'activo'
