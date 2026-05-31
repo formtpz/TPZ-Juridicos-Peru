@@ -4,6 +4,29 @@ import pandas as pd
 from io import BytesIO
 from permisos import validar_acceso
 
+def normalize_concat_sec(value, width=5):
+    if pd.isna(value):
+        return None
+    text = str(value).strip()
+    if text.endswith(".0"):
+        text = text[:-2]
+    text = text.replace(" ", "")
+    if text.isdigit():
+        return text.zfill(width)
+    return text
+
+
+def normalize_segment(value, start, end, pad_length=None):
+    if pd.isna(value):
+        return None
+    text = str(value).strip()
+    if text.endswith(".0"):
+        text = text[:-2]
+    text = text.replace(" ", "")
+    if pad_length:
+        text = text.zfill(pad_length)
+    return text[start:end]
+
 def parse_manzanas_input(texto: str):
     if not texto or not texto.strip():
         return set()
@@ -15,13 +38,13 @@ def parse_manzanas_input(texto: str):
             try:
                 inicio, fin = parte.split("-")
                 numeros.update(range(int(inicio), int(fin) + 1))
-            except ValueError:  # Especificar excepción
+            except:
                 continue
         else:
             try:
                 numeros.add(int(parte))
-            except ValueError:  # Especificar excepción
-                continue 
+            except:
+                continue
     return numeros
 
 def render():
@@ -50,18 +73,11 @@ def render():
     if modo == "Polígono (Excel)":
         try:
             df_entregas = pd.read_excel("Rentas_resumidos/Entregas_a_cofopri.xlsx", engine="openpyxl")
-        except FileNotFoundError as e:  # Especificar excepción
-            st.error(f"Error al cargar Entregas_a_cofopri.xlsx: {e}")
-            return
         except Exception as e:
-            st.error(f"Error inesperado al cargar archivo: {e}")
+            st.error(f"Error al cargar Entregas_a_cofopri.xlsx: {e}")
             return
 
         # Selección múltiple de polígonos disponibles
-        if 'poligono' not in df_entregas.columns:
-            st.error("❌ La columna 'poligono' no existe en Entregas_a_cofopri.xlsx")
-            return
-            
         poligonos_disp = sorted(df_entregas['poligono'].dropna().unique())
         poligonos_sel = st.multiselect("Seleccione uno o varios polígonos:", poligonos_disp)
 
@@ -88,30 +104,30 @@ def render():
 
             df[col_cat] = df[col_cat].astype(str).str.strip()
 
-            
-            # Extracción sector/manzana/lote con validación de índices
+            # Extracción sector/manzana/lote
             df["Sector"] = df[col_cat].apply(lambda c: c[6:8] if len(c) >= 8 else None)
             df["Manzana"] = df[col_cat].apply(lambda c: c[8:11] if len(c) >= 11 else None)
             df["Lote"] = df[col_cat].apply(lambda c: c[11:14] if len(c) >= 14 else None)
 
-            df["Sector_txt"] = df["Sector"].astype(str)
-            df["Manzana_txt"] = df["Manzana"].astype(str)
-
+            df["Sector_int"] = pd.to_numeric(df["Sector"], errors="coerce")
+            df["Manzana_int"] = pd.to_numeric(df["Manzana"], errors="coerce")
 
             # --- Modo 1: Sector/Manzana ---
             if modo == "Sector/Manzana":
-                sectores_unicos = sorted(df["Sector"].dropna().unique())
+                sectores_unicos = sorted(df["Sector_int"].dropna().unique())
+                sectores_unicos_str = [str(s).zfill(2) for s in sectores_unicos]
 
                 sectores_seleccionados = st.multiselect(
                     f"🏘️ Sectores para {archivo.name}",
-                    options=sectores_unicos,
+                    options=sectores_unicos_str,
                     format_func=lambda x: f"Sector {x}"
                 )
 
                 if sectores_seleccionados and st.button(f"✅ Aplicar filtro ({archivo.name})"):
                     mask = pd.Series([False] * len(df), index=df.index)
                     for sector in sectores_seleccionados:
-                        mask_sector = (df["Sector"] == sector)
+                        sector_int = int(sector)
+                        mask_sector = (df["Sector_int"] == sector_int)
                         mask = mask | mask_sector
 
                     df_filtrado = df[mask].copy()
@@ -143,24 +159,20 @@ def render():
                     st.warning(f"⚠️ No se encontraron registros en Entregas_a_cofopri.xlsx para los polígonos seleccionados.")
                     continue
 
-                # Extraer los 5 dígitos (posiciones 6–11) manteniendo ceros iniciales
+                # Extraer los 5 dígitos (posiciones 7–11) según la columna usada
                 if "referencia catastral" in col_cat.lower():
                     df["SecManz"] = df[col_cat].apply(
-                        lambda c: str(c).strip()[-17:-12] if pd.notna(c) and len(str(c).strip()) >= 17 else None
+                        lambda c: normalize_concat_sec(normalize_segment(c, 6, 11, pad_length=23)) if pd.notna(c) else None
                     )
                 else:  # Código del Lote
                     df["SecManz"] = df[col_cat].apply(
-                        lambda c: str(c).strip()[6:11] if pd.notna(c) and len(str(c).strip()) >= 11 else None
+                        lambda c: normalize_concat_sec(normalize_segment(c, 6, 11)) if pd.notna(c) else None
                     )
 
-                # Convertir ambas columnas a string y normalizar a 5 dígitos con ceros iniciales
-                df["SecManz"] = df["SecManz"].astype(str).str.strip().str.zfill(5)
-                
-                if 'concat_sec' not in df_entregas_sel.columns:
-                    st.error("❌ La columna 'concat_sec' no existe en Entregas_a_cofopri.xlsx")
-                    continue
-                    
-                df_entregas_sel["concat_sec"] = df_entregas_sel["concat_sec"].astype(str).str.strip().str.zfill(5)
+                # Normalizar ambas columnas como strings de 5 dígitos con ceros a la izquierda
+                df["SecManz"] = df["SecManz"].apply(normalize_concat_sec)
+                df_entregas_sel = df_entregas_sel.copy()
+                df_entregas_sel["concat_sec"] = df_entregas_sel["concat_sec"].apply(normalize_concat_sec)
 
                 # Join con entregas seleccionadas
                 df_filtrado = df.merge(
@@ -187,6 +199,9 @@ def render():
                     file_name=f"Filtrado_{'_'.join(poligonos_sel)}_{archivo.name}",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
+
+        except Exception as e:
+            st.error(f"Error al procesar {archivo.name}: {e}")
 
         except Exception as e:
             st.error(f"Error al procesar {archivo.name}: {e}")
