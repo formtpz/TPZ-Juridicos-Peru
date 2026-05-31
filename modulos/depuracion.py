@@ -172,4 +172,4 @@ def render():
                 )
 
         except Exception as e:
-            st.error(f"Error al procesar {archivo.name}: {e}")
+            st.error(f"Error al procesar {archivo.name}: {e}") 
