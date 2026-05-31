@@ -198,5 +198,3 @@ for archivo in archivo_list:
 
     except Exception as e:
         st.error(f"Error al procesar {archivo.name}: {e}")
-        except Exception as e:
-            st.error(f"Error al procesar {archivo.name}: {e}")
