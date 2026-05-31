@@ -21,7 +21,7 @@ def parse_manzanas_input(texto: str):
             try:
                 numeros.add(int(parte))
             except:
-                continue
+                continue 
     return numeros
 
 def render():
