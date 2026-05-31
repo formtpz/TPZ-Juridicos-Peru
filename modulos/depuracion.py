@@ -81,30 +81,25 @@ def render():
 
             df[col_cat] = df[col_cat].astype(str).str.strip()
 
-            # Extracción sector/manzana/lote
-            df["Sector"] = df[col_cat].apply(lambda c: c[6:8] if len(c) >= 8 else None)
-            df["Manzana"] = df[col_cat].apply(lambda c: c[8:11] if len(c) >= 11 else None)
-            df["Lote"] = df[col_cat].apply(lambda c: c[11:14] if len(c) >= 14 else None)
-
-            df["Sector_int"] = pd.to_numeric(df["Sector"], errors="coerce")
-            df["Manzana_int"] = pd.to_numeric(df["Manzana"], errors="coerce")
+            # Extracción sector/manzana/lote (mantener formato con ceros a la izquierda)
+            df["Sector"] = df[col_cat].apply(lambda c: c[6:8].zfill(2) if len(c) >= 8 else None)
+            df["Manzana"] = df[col_cat].apply(lambda c: c[8:11].zfill(3) if len(c) >= 11 else None)
+            df["Lote"] = df[col_cat].apply(lambda c: c[11:14].zfill(3) if len(c) >= 14 else None)
 
             # --- Modo 1: Sector/Manzana ---
             if modo == "Sector/Manzana":
-                sectores_unicos = sorted(df["Sector_int"].dropna().unique())
-                sectores_unicos_str = [str(s).zfill(2) for s in sectores_unicos]
+                sectores_unicos = sorted(df["Sector"].dropna().unique())
 
                 sectores_seleccionados = st.multiselect(
                     f"🏘️ Sectores para {archivo.name}",
-                    options=sectores_unicos_str,
+                    options=sectores_unicos,
                     format_func=lambda x: f"Sector {x}"
                 )
 
                 if sectores_seleccionados and st.button(f"✅ Aplicar filtro ({archivo.name})"):
                     mask = pd.Series([False] * len(df), index=df.index)
                     for sector in sectores_seleccionados:
-                        sector_int = int(sector)
-                        mask_sector = (df["Sector_int"] == sector_int)
+                        mask_sector = (df["Sector"] == sector)
                         mask = mask | mask_sector
 
                     df_filtrado = df[mask].copy()
@@ -175,9 +170,6 @@ def render():
                     file_name=f"Filtrado_{'_'.join(poligonos_sel)}_{archivo.name}",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
-
-        except Exception as e:
-            st.error(f"Error al procesar {archivo.name}: {e}")
 
         except Exception as e:
             st.error(f"Error al procesar {archivo.name}: {e}")
