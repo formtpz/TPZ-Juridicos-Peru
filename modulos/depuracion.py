@@ -136,19 +136,19 @@ def render():
                     st.warning(f"⚠️ No se encontraron registros en Entregas_a_cofopri.xlsx para los polígonos seleccionados.")
                     continue
 
-                # Extraer los 5 dígitos (posiciones 7–11) según la columna usada
+                # Extraer los 5 dígitos (posiciones 6–11) manteniendo ceros iniciales
                 if "referencia catastral" in col_cat.lower():
                     df["SecManz"] = df[col_cat].apply(
-                        lambda c: str(c).strip().zfill(23)[6:11] if pd.notna(c) else None
+                        lambda c: str(c).strip()[-17:-12] if pd.notna(c) and len(str(c).strip()) >= 12 else None
                     )
                 else:  # Código del Lote
                     df["SecManz"] = df[col_cat].apply(
-                        lambda c: str(c).strip()[6:11] if pd.notna(c) else None
+                        lambda c: str(c).strip()[6:11] if pd.notna(c) and len(str(c).strip()) >= 11 else None
                     )
 
-                # Convertir ambas columnas a string para evitar error de tipos
-                df["SecManz"] = df["SecManz"].astype(str).str.strip()
-                df_entregas_sel["concat_sec"] = df_entregas_sel["concat_sec"].astype(str).str.strip()
+                # Convertir ambas columnas a string y normalizar a 5 dígitos con ceros iniciales
+                df["SecManz"] = df["SecManz"].astype(str).str.strip().str.zfill(5)
+                df_entregas_sel["concat_sec"] = df_entregas_sel["concat_sec"].astype(str).str.strip().str.zfill(5)
 
                 # Join con entregas seleccionadas
                 df_filtrado = df.merge(
@@ -177,4 +177,4 @@ def render():
                 )
 
         except Exception as e:
-            st.error(f"Error al procesar {archivo.name}: {e}") 
+            st.error(f"Error al procesar {archivo.name}: {e}")
