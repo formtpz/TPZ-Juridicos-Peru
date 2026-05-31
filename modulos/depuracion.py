@@ -81,10 +81,15 @@ def render():
 
             df[col_cat] = df[col_cat].astype(str).str.strip()
 
-            # Extracción sector/manzana/lote (mantener formato con ceros a la izquierda)
-            df["Sector"] = df[col_cat].apply(lambda c: c[6:8].zfill(2) if len(c) >= 8 else None)
-            df["Manzana"] = df[col_cat].apply(lambda c: c[8:11].zfill(3) if len(c) >= 11 else None)
-            df["Lote"] = df[col_cat].apply(lambda c: c[11:14].zfill(3) if len(c) >= 14 else None)
+            
+            # Extracción sector/manzana/lote
+            df["Sector"] = df[col_cat].apply(lambda c: c[6:8] if len(c) >= 8 else None)
+            df["Manzana"] = df[col_cat].apply(lambda c: c[8:11] if len(c) >= 11 else None)
+            df["Lote"] = df[col_cat].apply(lambda c: c[11:14] if len(c) >= 14 else None)
+
+            df["Sector_txt"] = df["Sector"].astype(str)
+            df["Manzana_txt"] = df["Manzana"].astype(str)
+
 
             # --- Modo 1: Sector/Manzana ---
             if modo == "Sector/Manzana":
