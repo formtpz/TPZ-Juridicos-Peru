@@ -1,200 +1,192 @@
-# --- Configuración extra para modo Polígono ---
-poligonos_sel = None
-df_entregas = None
+# modulos/depuracion.py
+import streamlit as st
+import pandas as pd
+from io import BytesIO
+from permisos import validar_acceso
 
-if modo == "Polígono (Excel)":
-    try:
-        df_entregas = pd.read_excel(
-            "Rentas_resumidos/Entregas_a_cofopri.xlsx",
-            engine="openpyxl",
-            dtype=str
-        )
+def parse_manzanas_input(texto: str):
+    if not texto or not texto.strip():
+        return set()
+    texto = texto.replace(" ", "")
+    partes = texto.split(",")
+    numeros = set()
+    for parte in partes:
+        if "-" in parte:
+            try:
+                inicio, fin = parte.split("-")
+                numeros.update(range(int(inicio), int(fin) + 1))
+            except ValueError:  # Especificar excepción
+                continue
+        else:
+            try:
+                numeros.add(int(parte))
+            except ValueError:  # Especificar excepción
+                continue 
+    return numeros
 
-        # Limpieza preventiva
-        df_entregas = df_entregas.fillna("")
+def render():
+    validar_acceso("Depuración de Datos")
 
-    except Exception as e:
-        st.error(f"Error al cargar Entregas_a_cofopri.xlsx: {e}")
-        return
+    st.title("🧹 Depuración de Datos - Catastro")
 
-    poligonos_disp = sorted(df_entregas['poligono'].dropna().unique())
-    poligonos_sel = st.multiselect(
-        "Seleccione uno o varios polígonos:",
-        poligonos_disp
+    # --- Selector de modo ---
+    modo = st.radio("Selecciona el modo de filtrado:", ["Sector/Manzana", "Polígono (Excel)"])
+
+    # --- Subida múltiple de archivos ---
+    archivo_list = st.file_uploader(
+        "📂 Cargar uno o varios archivos Excel",
+        type=["xlsx", "xls"],
+        accept_multiple_files=True,
+        key="depuracion_catastro"
     )
 
-# --- Procesar cada archivo en lote ---
-for archivo in archivo_list:
+    if not archivo_list:
+        st.info("📌 Sube al menos un archivo Excel con la columna catastral para comenzar.")
+        return
 
-    st.markdown(f"### 📑 Procesando archivo: **{archivo.name}**")
+    # --- Configuración extra para modo Polígono ---
+    poligonos_sel = None
+    df_entregas = None
+    if modo == "Polígono (Excel)":
+        try:
+            df_entregas = pd.read_excel("Rentas_resumidos/Entregas_a_cofopri.xlsx", engine="openpyxl")
+        except FileNotFoundError as e:  # Especificar excepción
+            st.error(f"Error al cargar Entregas_a_cofopri.xlsx: {e}")
+            return
+        except Exception as e:
+            st.error(f"Error inesperado al cargar archivo: {e}")
+            return
 
-    try:
+        # Selección múltiple de polígonos disponibles
+        if 'poligono' not in df_entregas.columns:
+            st.error("❌ La columna 'poligono' no existe en Entregas_a_cofopri.xlsx")
+            return
+            
+        poligonos_disp = sorted(df_entregas['poligono'].dropna().unique())
+        poligonos_sel = st.multiselect("Seleccione uno o varios polígonos:", poligonos_disp)
 
-        # IMPORTANTE: leer todo como texto
-        df = pd.read_excel(
-            archivo,
-            engine="openpyxl",
-            dtype=str
-        )
+    # --- Procesar cada archivo en lote ---
+    for archivo in archivo_list:
+        st.markdown(f"### 📑 Procesando archivo: **{archivo.name}**")
 
-        df = df.fillna("")
+        try:
+            df = pd.read_excel(archivo, engine="openpyxl")
 
-        # Buscar columna catastral o columna Código del Lote
-        col_cat = None
+            # Buscar columna catastral o columna Código del Lote
+            col_cat = None
+            for col in df.columns:
+                if "código de referencia catastral" in col.lower():
+                    col_cat = col
+                    break
+                if "código del lote" in col.lower():
+                    col_cat = col
+                    break
 
-        for col in df.columns:
-
-            if "código de referencia catastral" in col.lower():
-                col_cat = col
-                break
-
-            if "código del lote" in col.lower():
-                col_cat = col
-                break
-
-        if not col_cat:
-            st.error(
-                "❌ No se encontró la columna "
-                "'Código de Referencia Catastral' "
-                "ni 'Código del Lote'."
-            )
-            continue
-
-        # Limpiar columna principal
-        df[col_cat] = (
-            df[col_cat]
-            .astype(str)
-            .str.strip()
-            .str.replace(".0", "", regex=False)
-        )
-
-        # Extracción sector/manzana/lote
-        df["Sector"] = df[col_cat].apply(
-            lambda c: c[6:8] if len(c) >= 8 else None
-        )
-
-        df["Manzana"] = df[col_cat].apply(
-            lambda c: c[8:11] if len(c) >= 11 else None
-        )
-
-        df["Lote"] = df[col_cat].apply(
-            lambda c: c[11:14] if len(c) >= 14 else None
-        )
-
-        df["Sector_txt"] = df["Sector"].astype(str)
-        df["Manzana_txt"] = df["Manzana"].astype(str)
-
-        # ----------------------------------------------------
-        # MODO POLIGONO
-        # ----------------------------------------------------
-        if modo == "Polígono (Excel)":
-
-            if not poligonos_sel:
-                st.warning(
-                    "⚠️ Seleccione al menos un polígono para aplicar el filtro."
-                )
+            if not col_cat:
+                st.error("❌ No se encontró la columna 'Código de Referencia Catastral' ni 'Código del Lote'.")
                 continue
 
-            df_entregas_sel = (
-                df_entregas[
-                    df_entregas["poligono"].isin(poligonos_sel)
-                ]
-                .copy()
-            )
+            df[col_cat] = df[col_cat].astype(str).str.strip()
 
-            if df_entregas_sel.empty:
-                st.warning(
-                    "⚠️ No se encontraron registros para los polígonos seleccionados."
-                )
-                continue
+            
+            # Extracción sector/manzana/lote con validación de índices
+            df["Sector"] = df[col_cat].apply(lambda c: c[6:8] if len(c) >= 8 else None)
+            df["Manzana"] = df[col_cat].apply(lambda c: c[8:11] if len(c) >= 11 else None)
+            df["Lote"] = df[col_cat].apply(lambda c: c[11:14] if len(c) >= 14 else None)
 
-            # Extraer sector+manzana
-            if "referencia catastral" in col_cat.lower():
+            df["Sector_txt"] = df["Sector"].astype(str)
+            df["Manzana_txt"] = df["Manzana"].astype(str)
 
-                df["SecManz"] = df[col_cat].apply(
-                    lambda c: c[-17:-12]
-                    if pd.notna(c) and len(str(c).strip()) >= 17
-                    else None
-                )
 
-            else:  # Código del Lote
+            # --- Modo 1: Sector/Manzana ---
+            if modo == "Sector/Manzana":
+                sectores_unicos = sorted(df["Sector"].dropna().unique())
 
-                df["SecManz"] = df[col_cat].apply(
-                    lambda c: c[6:11]
-                    if pd.notna(c) and len(str(c).strip()) >= 11
-                    else None
+                sectores_seleccionados = st.multiselect(
+                    f"🏘️ Sectores para {archivo.name}",
+                    options=sectores_unicos,
+                    format_func=lambda x: f"Sector {x}"
                 )
 
-            # Limpiar SecManz
-            df["SecManz"] = (
-                df["SecManz"]
-                .astype(str)
-                .str.strip()
-                .str.replace(".0", "", regex=False)
-                .str.zfill(5)
-            )
+                if sectores_seleccionados and st.button(f"✅ Aplicar filtro ({archivo.name})"):
+                    mask = pd.Series([False] * len(df), index=df.index)
+                    for sector in sectores_seleccionados:
+                        mask_sector = (df["Sector"] == sector)
+                        mask = mask | mask_sector
 
-            # Limpiar concat_sec
-            df_entregas_sel["concat_sec"] = (
-                df_entregas_sel["concat_sec"]
-                .astype(str)
-                .str.strip()
-                .str.replace(".0", "", regex=False)
-                .str.zfill(5)
-            )
+                    df_filtrado = df[mask].copy()
 
-            # DEBUG (puedes borrarlo después)
-            st.write("Primeros valores SecManz:")
-            st.write(df["SecManz"].dropna().unique()[:10])
+                    st.write(f"**Filas encontradas:** {len(df_filtrado)}")
+                    st.dataframe(df_filtrado.head(20), use_container_width=True)
 
-            st.write("Primeros valores concat_sec:")
-            st.write(df_entregas_sel["concat_sec"].dropna().unique()[:10])
+                    output = BytesIO()
+                    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+                        df_filtrado.to_excel(writer, index=False, sheet_name="Filtrado")
+                    output.seek(0)
 
-            # JOIN
-            df_filtrado = df.merge(
-                df_entregas_sel[
-                    ["concat_sec", "poligono"]
-                ],
-                left_on="SecManz",
-                right_on="concat_sec",
-                how="inner"
-            )
+                    st.download_button(
+                        label=f"⬇️ Descargar resultado ({archivo.name})",
+                        data=output,
+                        file_name=f"Filtrado_{archivo.name}",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
 
-            df_filtrado.rename(
-                columns={"poligono": "Poligono"},
-                inplace=True
-            )
+            # --- Modo 2: Polígono (Excel) ---
+            else:
+                if not poligonos_sel:
+                    st.warning("⚠️ Seleccione al menos un polígono para aplicar el filtro.")
+                    continue
 
-            st.write(
-                f"**Filas encontradas:** {len(df_filtrado)}"
-            )
+                df_entregas_sel = df_entregas[df_entregas['poligono'].isin(poligonos_sel)]
 
-            st.dataframe(
-                df_filtrado.head(20),
-                use_container_width=True
-            )
+                if df_entregas_sel.empty:
+                    st.warning(f"⚠️ No se encontraron registros en Entregas_a_cofopri.xlsx para los polígonos seleccionados.")
+                    continue
 
-            output = BytesIO()
+                # Extraer los 5 dígitos (posiciones 6–11) manteniendo ceros iniciales
+                if "referencia catastral" in col_cat.lower():
+                    df["SecManz"] = df[col_cat].apply(
+                        lambda c: str(c).strip()[-17:-12] if pd.notna(c) and len(str(c).strip()) >= 17 else None
+                    )
+                else:  # Código del Lote
+                    df["SecManz"] = df[col_cat].apply(
+                        lambda c: str(c).strip()[6:11] if pd.notna(c) and len(str(c).strip()) >= 11 else None
+                    )
 
-            with pd.ExcelWriter(
-                output,
-                engine="openpyxl"
-            ) as writer:
+                # Convertir ambas columnas a string y normalizar a 5 dígitos con ceros iniciales
+                df["SecManz"] = df["SecManz"].astype(str).str.strip().str.zfill(5)
+                
+                if 'concat_sec' not in df_entregas_sel.columns:
+                    st.error("❌ La columna 'concat_sec' no existe en Entregas_a_cofopri.xlsx")
+                    continue
+                    
+                df_entregas_sel["concat_sec"] = df_entregas_sel["concat_sec"].astype(str).str.strip().str.zfill(5)
 
-                df_filtrado.to_excel(
-                    writer,
-                    index=False,
-                    sheet_name="Filtrado"
+                # Join con entregas seleccionadas
+                df_filtrado = df.merge(
+                    df_entregas_sel[["concat_sec", "poligono"]],
+                    left_on="SecManz",
+                    right_on="concat_sec",
+                    how="inner"
                 )
 
-            output.seek(0)
+                # Agregar columna Poligono
+                df_filtrado.rename(columns={"poligono": "Poligono"}, inplace=True)
 
-            st.download_button(
-                label=f"⬇️ Descargar resultado ({archivo.name})",
-                data=output,
-                file_name=f"Filtrado_{'_'.join(poligonos_sel)}_{archivo.name}",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+                st.write(f"**Filas encontradas:** {len(df_filtrado)}")
+                st.dataframe(df_filtrado.head(20), use_container_width=True)
 
-    except Exception as e:
-        st.error(f"Error al procesar {archivo.name}: {e}")
+                output = BytesIO()
+                with pd.ExcelWriter(output, engine="openpyxl") as writer:
+                    df_filtrado.to_excel(writer, index=False, sheet_name="Filtrado")
+                output.seek(0)
+
+                st.download_button(
+                    label=f"⬇️ Descargar resultado ({archivo.name})",
+                    data=output,
+                    file_name=f"Filtrado_{'_'.join(poligonos_sel)}_{archivo.name}",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+
+        except Exception as e:
+            st.error(f"Error al procesar {archivo.name}: {e}")
