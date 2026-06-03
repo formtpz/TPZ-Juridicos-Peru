@@ -1,5 +1,5 @@
 # modulos/filtro_errores.py
-# Versión: 2.0 - Implementación completa de correcciones
+# Versión: 3.0 - Repositorio de errores con estado editable
 import streamlit as st
 import pandas as pd
 import os
@@ -17,6 +17,7 @@ MUNICIPIOS = {
     "CH": "🌊 Chorrillos"
 }
 
+ERROR_REPOSITORY_PATH = "Repositorio_de_Errores"
 RENTAS_PATH = "Rentas_resumidos"
 
 
@@ -24,52 +25,46 @@ RENTAS_PATH = "Rentas_resumidos"
 # FUNCIONES AUXILIARES
 # ============================================================
 
-def get_available_municipalities():
+def ensure_error_repository_exists():
     """
-    Obtiene municipios disponibles en la carpeta Rentas_resumidos.
-    Busca archivos con nombres VES, SJM, CH en formatos .xlsx o .xlsb
+    Verifica que la carpeta Repositorio_de_Errores exista.
+    Si no existe, la crea.
     """
-    if not os.path.exists(RENTAS_PATH):
+    if not os.path.exists(ERROR_REPOSITORY_PATH):
+        os.makedirs(ERROR_REPOSITORY_PATH, exist_ok=True)
+        st.info(f"📁 Se creó la carpeta '{ERROR_REPOSITORY_PATH}'")
+    return os.path.exists(ERROR_REPOSITORY_PATH)
+
+
+def get_available_error_files():
+    """
+    Obtiene lista de archivos Excel en Repositorio_de_Errores
+    Soporta .xlsx y .xlsb
+    """
+    if not os.path.exists(ERROR_REPOSITORY_PATH):
         return []
     
-    available = []
-    for mun_code in MUNICIPIOS.keys():
-        # Buscar tanto .xlsx como .xlsb
-        file_xlsx = os.path.join(RENTAS_PATH, f"{mun_code}.xlsx")
-        file_xlsb = os.path.join(RENTAS_PATH, f"{mun_code}.xlsb")
-        
-        if os.path.exists(file_xlsx) or os.path.exists(file_xlsb):
-            available.append(mun_code)
+    available_files = []
+    for filename in os.listdir(ERROR_REPOSITORY_PATH):
+        if filename.endswith(('.xlsx', '.xlsb')):
+            available_files.append(filename)
     
-    return available
+    return sorted(available_files)
 
 
-def load_all_error_sheets(mun_code):
+def load_error_file(filename):
     """
-    Carga todas las hojas del archivo de municipio.
-    Soporta tanto .xlsx como .xlsb
-    Cada hoja es un tipo de error diferente.
-    Retorna un diccionario: {nombre_hoja: dataframe}
+    Carga un archivo Excel desde Repositorio_de_Errores
+    Retorna un diccionario {nombre_hoja: dataframe}
     """
-    file_xlsx = os.path.join(RENTAS_PATH, f"{mun_code}.xlsx")
-    file_xlsb = os.path.join(RENTAS_PATH, f"{mun_code}.xlsb")
+    file_path = os.path.join(ERROR_REPOSITORY_PATH, filename)
     
-    # Determinar qué archivo existe
-    file_path = None
-    engine = None
-    
-    if os.path.exists(file_xlsx):
-        file_path = file_xlsx
-        engine = "openpyxl"
-    elif os.path.exists(file_xlsb):
-        file_path = file_xlsb
-        engine = "pyxlsb"
-    else:
+    if not os.path.exists(file_path):
+        st.error(f"❌ Archivo no encontrado: {file_path}")
         return {}
     
     try:
-        if engine == "pyxlsb":
-            # Para archivos .xlsb usamos pyxlsb
+        if filename.endswith('.xlsb'):
             from pyxlsb import open_workbook
             sheets = {}
             with open_workbook(file_path) as wb:
@@ -77,29 +72,64 @@ def load_all_error_sheets(mun_code):
                     try:
                         df = pd.read_excel(file_path, sheet_name=sheet.name, engine="pyxlsb")
                         if not df.empty:
-                            # Convertir a tipos de datos apropiados para evitar floats
-                            df = convert_coordinate_columns_to_string(df)
+                            df = ensure_status_column(df)
                             sheets[sheet.name] = df
-                    except Exception as e:
+                    except Exception:
                         continue
             return sheets
         else:
-            # Para archivos .xlsx usamos openpyxl
+            # Archivo .xlsx
             xls = pd.ExcelFile(file_path, engine="openpyxl")
             sheets = {}
             for sheet_name in xls.sheet_names:
                 try:
                     df = pd.read_excel(file_path, sheet_name=sheet_name, engine="openpyxl")
                     if not df.empty:
-                        # Convertir a tipos de datos apropiados para evitar floats
-                        df = convert_coordinate_columns_to_string(df)
+                        df = ensure_status_column(df)
                         sheets[sheet_name] = df
-                except Exception as e:
+                except Exception:
                     continue
             return sheets
     except Exception as e:
-        st.error(f"Error al cargar {mun_code}: {e}")
+        st.error(f"❌ Error al cargar {filename}: {e}")
         return {}
+
+
+def ensure_status_column(df):
+    """
+    Verifica que existe columna 'Estado' en el DataFrame.
+    Si no existe, la crea con valor 'No corregido' por defecto.
+    """
+    if "Estado" not in df.columns:
+        df.insert(len(df.columns), "Estado", "No corregido")
+    return df
+
+
+def save_error_file(filename, sheets_dict):
+    """
+    Guarda los DataFrames actualizados en el archivo Excel
+    Crea backup automático del archivo original
+    """
+    file_path = os.path.join(ERROR_REPOSITORY_PATH, filename)
+    
+    try:
+        # Crear backup
+        if os.path.exists(file_path):
+            backup_name = f"{filename[:-5]}_backup_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+            backup_path = os.path.join(ERROR_REPOSITORY_PATH, backup_name)
+            import shutil
+            shutil.copy(file_path, backup_path)
+        
+        # Guardar archivo actualizado
+        with pd.ExcelWriter(file_path, engine="openpyxl") as writer:
+            for sheet_name, df in sheets_dict.items():
+                safe_sheet_name = sheet_name[:31]
+                df.to_excel(writer, index=False, sheet_name=safe_sheet_name)
+        
+        return True
+    except Exception as e:
+        st.error(f"❌ Error al guardar {filename}: {e}")
+        return False
 
 
 def convert_coordinate_columns_to_string(df):
@@ -112,12 +142,9 @@ def convert_coordinate_columns_to_string(df):
     
     for col, col_l in zip(df.columns, col_lower):
         if "sector" in col_l or "sect" in col_l or "manzana" in col_l or "manz" in col_l or "lote" in col_l:
-            # Convertir a string y rellenar con ceros
             df[col] = df[col].astype(str).str.strip()
-            # Si contiene decimal, remover la parte decimal
             if any(df[col].str.contains(r'\.', na=False)):
                 df[col] = df[col].str.replace(r'\.0$', '', regex=True)
-            # Rellenar con ceros
             if "lote" in col_l:
                 df[col] = df[col].apply(lambda x: x.zfill(3) if pd.notna(x) and x != '' else x)
             elif "manzana" in col_l or "manz" in col_l:
@@ -131,11 +158,9 @@ def convert_coordinate_columns_to_string(df):
 def sanitize_tab_label(name: str) -> str:
     """
     Sanitiza el nombre de un tab removiendo caracteres potencialmente problemáticos
-    y limitando la longitud. Devuelve una cadena segura para usar en etiquetas.
     """
     if not isinstance(name, str):
         name = str(name)
-    # Permitir letras, números, espacios y algunos signos básicos
     safe = ''.join(c for c in name if c.isalnum() or c in (' ', '_', '-', '(', ')'))
     safe = safe.strip()
     if not safe:
@@ -143,41 +168,24 @@ def sanitize_tab_label(name: str) -> str:
     return safe[:50]
 
 
-def load_entregas_data():
-    """Carga datos de Entregas_a_cofopri.xlsx"""
-    file_path = os.path.join(RENTAS_PATH, "Entregas_a_cofopri.xlsx")
-    try:
-        df = pd.read_excel(file_path, engine="openpyxl")
-        # Convertir concat_sec a string
-        if "concat_sec" in df.columns:
-            df["concat_sec"] = df["concat_sec"].astype(str).str.strip()
-        return df
-    except Exception as e:
-        st.error(f"Error al cargar Entregas_a_cofopri.xlsx: {e}")
-        return None
-
-
 def find_coordinate_columns(df):
     """
-    Busca automáticamente las columnas de sector, manzana y lote en un DataFrame específico.
+    Busca automáticamente las columnas de sector, manzana y lote en un DataFrame.
     Retorna un diccionario con los nombres de columnas encontrados.
     """
     cols_found = {}
     col_lower = [c.lower() for c in df.columns]
     
-    # Buscar sector
     for col, col_l in zip(df.columns, col_lower):
         if "sector" in col_l or "sect" in col_l:
             cols_found["sector"] = col
             break
     
-    # Buscar manzana
     for col, col_l in zip(df.columns, col_lower):
         if "manzana" in col_l or "manz" in col_l:
             cols_found["manzana"] = col
             break
     
-    # Buscar lote
     for col, col_l in zip(df.columns, col_lower):
         if "lote" in col_l:
             cols_found["lote"] = col
@@ -189,12 +197,9 @@ def find_coordinate_columns(df):
 def filter_data(df, sector=None, manzana=None, lote=None):
     """Filtra un dataframe por sector, manzana y lote"""
     filtered = df.copy()
-    
-    # Detectar columnas EN ESTE DATAFRAME ESPECÍFICO
     coords_cols = find_coordinate_columns(df)
     
     if not coords_cols:
-        # Si no hay coordenadas, devolver todo
         return filtered
     
     if sector is not None and sector != "" and "sector" in coords_cols:
@@ -223,11 +228,31 @@ def export_to_excel(dfs_dict):
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         for sheet_name, df in dfs_dict.items():
-            # Limitar nombre de hoja a 31 caracteres
             safe_sheet_name = sheet_name[:31]
             df.to_excel(writer, index=False, sheet_name=safe_sheet_name)
     output.seek(0)
     return output
+
+
+def generate_error_statistics(error_sheets):
+    """
+    Genera estadísticas generales de los errores
+    """
+    total_errors = sum(len(df) for df in error_sheets.values())
+    corrected_count = 0
+    not_corrected_count = 0
+    
+    for df in error_sheets.values():
+        if "Estado" in df.columns:
+            corrected_count += (df["Estado"] == "Corregido").sum()
+            not_corrected_count += (df["Estado"] == "No corregido").sum()
+    
+    return {
+        "total_errors": total_errors,
+        "corrected": corrected_count,
+        "not_corrected": not_corrected_count,
+        "percentage_corrected": (corrected_count / total_errors * 100) if total_errors > 0 else 0
+    }
 
 
 # ============================================================
@@ -237,78 +262,92 @@ def export_to_excel(dfs_dict):
 def render():
     validar_acceso("Filtro de Errores")
     
-    st.title("🔍 Filtro de Errores - Consulta Sector/Mzn/lote o Poligono")
+    st.title("🔍 Filtro de Errores - Repositorio Dinámico")
     st.markdown("""
-    Filtra y visualiza errores por ubicación catastral.
-    Selecciona un municipio, sector, manzana y/o lote para ver todos los errores asociados.
+    Carga excels desde el Repositorio de Errores, visualiza y marca errores como corregidos.
+    Los cambios se guardan automáticamente en el archivo original.
     """)
+    
+    # Asegurar que existe la carpeta
+    ensure_error_repository_exists()
     
     # ============================================================
     # INICIALIZAR ESTADO DE SESIÓN
     # ============================================================
-    if "current_municipio" not in st.session_state:
-        st.session_state.current_municipio = None
+    if "current_error_file" not in st.session_state:
+        st.session_state.current_error_file = None
     if "error_sheets_cache" not in st.session_state:
         st.session_state.error_sheets_cache = {}
+    if "file_modified" not in st.session_state:
+        st.session_state.file_modified = False
     
     # ============================================================
-    # SELECTOR DE MUNICIPIO
+    # SELECTOR DE ARCHIVO DE ERROR
     # ============================================================
-    available_mun = get_available_municipalities()
+    st.subheader("📁 Selecciona un archivo de errores")
     
-    if not available_mun:
-        st.error("❌ No hay archivos de municipios disponibles en para esta consulta, avisar a SIG. /")
-        st.info("📌 Se esperan archivos: VES.xlsb/xlsx, SJM.xlsx, CH.xlsx")
+    available_files = get_available_error_files()
+    
+    if not available_files:
+        st.warning("⚠️ No hay archivos Excel en la carpeta 'Repositorio_de_Errores'")
+        st.info("💡 Por favor, carga un archivo Excel en la carpeta antes de continuar.")
         return
     
-    municipio = st.selectbox(
-        "🏘️ Selecciona un Municipio",
-        options=available_mun,
-        format_func=lambda x: MUNICIPIOS.get(x, x)
+    error_file = st.selectbox(
+        "🗂️ Archivo de errores disponibles",
+        options=available_files,
+        help="Selecciona el archivo Excel que deseas procesar"
     )
     
-    # Cargar datos si el municipio cambió
-    if municipio != st.session_state.current_municipio:
-        st.session_state.current_municipio = municipio
-        st.session_state.error_sheets_cache = load_all_error_sheets(municipio)
-        # Intentar rerun de forma segura: algunos entornos/versions de Streamlit
-        # no exponen `experimental_rerun`. Usar `rerun` si existe o como
-        # fallback detener la ejecución con `st.stop()`.
+    # Cargar datos si el archivo cambió
+    if error_file != st.session_state.current_error_file:
+        st.session_state.current_error_file = error_file
+        st.session_state.error_sheets_cache = load_error_file(error_file)
+        st.session_state.file_modified = False
+        
         try:
-            if hasattr(st, "experimental_rerun") and callable(st.experimental_rerun):
-                st.experimental_rerun()
-            elif hasattr(st, "rerun") and callable(st.rerun):
+            if hasattr(st, "rerun") and callable(st.rerun):
                 st.rerun()
-            else:
-                st.stop()
+            elif hasattr(st, "experimental_rerun") and callable(st.experimental_rerun):
+                st.experimental_rerun()
         except Exception:
-            try:
-                st.stop()
-            except Exception:
-                pass
+            pass
     
     error_sheets = st.session_state.error_sheets_cache
     
     if not error_sheets:
-        st.error(f"❌ No se encontraron hojas o datos en {municipio}, avisar a SIG.")
-        st.info("💡 Selecciona la base de datos a consultar.")
+        st.error(f"❌ No se encontraron datos en {error_file}")
         return
     
-    total_registros = sum(len(df) for df in error_sheets.values())
-    st.success(f"✅ Cargadas {len(error_sheets)} tipo(s) de error con {total_registros} registros en total")
+    # ============================================================
+    # ESTADÍSTICAS GENERALES
+    # ============================================================
+    stats = generate_error_statistics(error_sheets)
+    
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("📊 Total de Errores", stats["total_errors"])
+    with col2:
+        st.metric("✅ Corregidos", stats["corrected"], delta=f"{stats['percentage_corrected']:.1f}%")
+    with col3:
+        st.metric("❌ No Corregidos", stats["not_corrected"])
+    with col4:
+        st.metric("📈 Progreso", f"{stats['percentage_corrected']:.1f}%")
+    
+    st.markdown("---")
     
     # ============================================================
     # SELECTOR DE TIPO DE FILTRADO
     # ============================================================
-    st.markdown("---")
-    st.subheader("🔎 Elige cómo deseas filtrar los datos")
+    st.subheader("🔎 Opciones de visualización")
     
     filtro_tipo = st.radio(
-        "Opción de filtrado:",
-        options=["sector_manzana", "poligono"],
+        "¿Cómo deseas visualizar los datos?",
+        options=["todas_las_hojas", "hoja_especifica", "filtrar_por_ubicacion"],
         format_func=lambda x: {
-            "sector_manzana": "📍 Filtrar por Sector, Manzana y Lote",
-            "poligono": "🗺️ Filtrar por Polígono",
+            "todas_las_hojas": "📋 Todas las hojas consolidadas",
+            "hoja_especifica": "📄 Una hoja específica",
+            "filtrar_por_ubicacion": "📍 Filtrar por Sector/Manzana/Lote"
         }[x],
         horizontal=True
     )
@@ -316,58 +355,137 @@ def render():
     st.markdown("---")
     
     # ============================================================
-    # OPCIÓN 1: FILTRAR POR SECTOR, MANZANA Y LOTE
+    # OPCIÓN 1: MOSTRAR TODAS LAS HOJAS CONSOLIDADAS
     # ============================================================
-    if filtro_tipo == "sector_manzana":
-        st.subheader("📍 Filtro por Sector, Manzana y Lote")
-        st.markdown("Selecciona el filtro para observar las validaciones asociadas")
+    if filtro_tipo == "todas_las_hojas":
+        st.subheader("📋 Todos los Errores - Vista Consolidada")
         
-        # Consolidar todos los datos de todas las hojas para buscar coordenadas
+        # Consolidar todas las hojas
+        df_consolidated = pd.concat(error_sheets.values(), ignore_index=True)
+        
+        st.write(f"**Total de registros:** {len(df_consolidated)}")
+        
+        # Mostrar tabla completa
+        st.dataframe(df_consolidated.astype(str), height=500, use_container_width=True)
+        
+        # Botón para descargar consolidado
+        st.markdown("---")
+        excel_all = export_to_excel({"Consolidado": df_consolidated})
+        st.download_button(
+            label="⬇️ Descargar Consolidado",
+            data=excel_all,
+            file_name=f"{error_file[:-5]}_consolidado.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
+    
+    # ============================================================
+    # OPCIÓN 2: MOSTRAR UNA HOJA ESPECÍFICA CON EDICIÓN
+    # ============================================================
+    elif filtro_tipo == "hoja_especifica":
+        st.subheader("📄 Selecciona una Hoja para Editar")
+        
+        hoja_seleccionada = st.selectbox(
+            "🗂️ Hoja",
+            options=list(error_sheets.keys()),
+            format_func=lambda x: f"{x} ({len(error_sheets[x])} registros)"
+        )
+        
+        if hoja_seleccionada:
+            df_hoja = error_sheets[hoja_seleccionada].copy()
+            
+            st.write(f"**Registros en esta hoja:** {len(df_hoja)}")
+            
+            # Contar estados
+            if "Estado" in df_hoja.columns:
+                corrected = (df_hoja["Estado"] == "Corregido").sum()
+                not_corrected = (df_hoja["Estado"] == "No corregido").sum()
+                st.info(f"✅ Corregidos: {corrected} | ❌ No corregidos: {not_corrected}")
+            
+            # TABLA EDITABLE
+            st.markdown("**Edita el estado de los errores:**")
+            
+            edited_df = st.data_editor(
+                df_hoja,
+                use_container_width=True,
+                height=500,
+                key=f"editor_{hoja_seleccionada}"
+            )
+            
+            # Verificar si hubo cambios
+            if not edited_df.equals(df_hoja):
+                st.session_state.file_modified = True
+                error_sheets[hoja_seleccionada] = edited_df
+                
+                st.success("✏️ Cambios detectados")
+                
+                # Botón guardar
+                if st.button("💾 Guardar Cambios", type="primary", use_container_width=True):
+                    if save_error_file(error_file, error_sheets):
+                        st.success(f"✅ Archivo guardado correctamente: {error_file}")
+                        st.session_state.file_modified = False
+                    else:
+                        st.error("❌ Error al guardar el archivo")
+            
+            # Descargar hoja individual
+            st.markdown("---")
+            excel_hoja = export_to_excel({hoja_seleccionada: df_hoja})
+            st.download_button(
+                label=f"⬇️ Descargar {hoja_seleccionada}",
+                data=excel_hoja,
+                file_name=f"{error_file[:-5]}_{hoja_seleccionada}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+    
+    # ============================================================
+    # OPCIÓN 3: FILTRAR POR UBICACIÓN CATASTRAL
+    # ============================================================
+    elif filtro_tipo == "filtrar_por_ubicacion":
+        st.subheader("📍 Filtro por Sector, Manzana y Lote")
+        st.markdown("Selecciona la ubicación para ver solo esos errores")
+        
+        # Consolidar para obtener coordenadas
         df_consolidated = pd.concat(error_sheets.values(), ignore_index=True)
         coords_cols = find_coordinate_columns(df_consolidated)
         
         if not coords_cols:
-            st.warning("⚠️ No se encontraron columnas de sector, manzana o lote")
-            st.write("Columnas disponibles:", list(df_consolidated.columns))
+            st.warning("⚠️ No se encontraron columnas de coordenadas (sector, manzana, lote)")
             return
         
-        # Crear filtros cascada
+        # Filtros cascada
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            # Selector de Sector
             sector_col = coords_cols.get("sector")
             if sector_col:
                 sectors = sorted([x for x in df_consolidated[sector_col].dropna().unique() if str(x).strip()])
                 sector = st.selectbox(
-                    f"Sector",
+                    "Sector",
                     options=[None] + list(sectors),
                     format_func=lambda x: f"Sector {x}" if x is not None else "Todos"
                 )
             else:
                 sector = None
-                st.warning("⚠️ Columna de sector no encontrada")
         
-        # Filtrar manzanas según sector
+        # Filtrar manzanas
         temp_df = df_consolidated.copy()
         if sector is not None and sector_col:
             temp_df = temp_df[temp_df[sector_col].astype(str) == str(sector)]
         
         with col2:
-            # Selector de Manzana
             manzana_col = coords_cols.get("manzana")
             if manzana_col:
                 manzanas = sorted([x for x in temp_df[manzana_col].dropna().unique() if str(x).strip()])
                 manzana = st.selectbox(
-                    f"Manzana",
+                    "Manzana",
                     options=[None] + list(manzanas),
                     format_func=lambda x: f"Manzana {x}" if x is not None else "Todas"
                 )
             else:
                 manzana = None
-                st.warning("⚠️ Columna de manzana no encontrada")
         
-        # Filtrar lotes según sector y manzana
+        # Filtrar lotes
         temp_df2 = df_consolidated.copy()
         if sector is not None and sector_col:
             temp_df2 = temp_df2[temp_df2[sector_col].astype(str) == str(sector)]
@@ -375,23 +493,18 @@ def render():
             temp_df2 = temp_df2[temp_df2[manzana_col].astype(str) == str(manzana)]
         
         with col3:
-            # Selector de Lote
             lote_col = coords_cols.get("lote")
             if lote_col:
                 lotes = sorted([x for x in temp_df2[lote_col].dropna().unique() if str(x).strip()])
                 lote = st.selectbox(
-                    f"Lote",
+                    "Lote",
                     options=[None] + list(lotes),
                     format_func=lambda x: f"Lote {x}" if x is not None else "Todos"
                 )
             else:
                 lote = None
         
-        # ============================================================
-        # FILTRAR POR CADA TIPO DE ERROR Y MOSTRAR EN TABS
-        # ============================================================
-        
-        # Filtrar datos de cada tipo de error según los criterios
+        # Aplicar filtros
         filtered_errors = {}
         for error_name, df_error in error_sheets.items():
             df_filtered = filter_data(df_error, sector, manzana, lote)
@@ -402,202 +515,74 @@ def render():
             st.warning("⚠️ No hay registros con los criterios seleccionados")
         else:
             total_filtered = sum(len(df) for df in filtered_errors.values())
-            st.success(f"✅ Se encontraron {total_filtered} predio(s) con validacion(es) pendiente(s)")
+            st.success(f"✅ Se encontraron {total_filtered} predio(s) con error(es)")
             
-            # Mostrar info de ubicación
-            location_info = []
-            if sector is not None:
-                location_info.append(f"Sector {sector}")
-            if manzana is not None:
-                location_info.append(f"Manzana {manzana}")
-            if lote is not None:
-                location_info.append(f"Lote {lote}")
-            
-            location_text = " - ".join(location_info) if location_info else "General"
-            st.info(f"📍 Ubicación: {location_text}")
-            
-            # ============================================================
-            # MOSTRAR RESUMEN DE ERRORES FILTRADOS
-            # ============================================================
-            st.subheader("📊 Resumen de Errores (Filtrado)")
+            # Mostrar resumen
+            st.subheader("📊 Resumen de Errores")
             resumen_data = {
                 "Tipo de Error": list(filtered_errors.keys()),
-                "Cantidad de Predios": [len(df) for df in filtered_errors.values()]
+                "Cantidad": [len(df) for df in filtered_errors.values()]
             }
             resumen_df = pd.DataFrame(resumen_data)
-            st.dataframe(resumen_df.astype(str), height=400, use_container_width=True, hide_index=True)
+            st.dataframe(resumen_df, use_container_width=True, hide_index=True)
             
             st.markdown("---")
             
-            # Crear tabs dinámicamente para cada tipo de error encontrado
-            tabs = st.tabs([f"🔴 {sanitize_tab_label(error_name)} ({len(filtered_errors[error_name])})" for error_name in filtered_errors.keys()])
+            # Tabs para cada tipo de error
+            tabs = st.tabs([f"🔴 {sanitize_tab_label(name)} ({len(filtered_errors[name])})" 
+                           for name in filtered_errors.keys()])
             
-            # Dataframe consolidado para descargar
             all_filtered_data = {}
             
             for tab, (error_name, df_filtered) in zip(tabs, filtered_errors.items()):
                 with tab:
                     st.markdown(f"### {error_name}")
-                    st.write(f"**Predios con {error_name}:** {len(df_filtered)}")
+                    st.write(f"**Registros:** {len(df_filtered)}")
                     
-                    # Mostrar tabla (convertimos a string para evitar overflow en la visualización)
-                    st.dataframe(df_filtered.astype(str), height=400, use_container_width=True)
+                    # Tabla editable
+                    edited_df = st.data_editor(
+                        df_filtered,
+                        use_container_width=True,
+                        height=400,
+                        key=f"editor_filtered_{error_name}"
+                    )
                     
-                    # Guardar para descargar consolidado
-                    all_filtered_data[error_name] = df_filtered
+                    if not edited_df.equals(df_filtered):
+                        st.session_state.file_modified = True
+                        error_sheets[error_name] = edited_df
                     
-                    # Botón descargar individual
-                    excel_data = export_to_excel({error_name: df_filtered})
+                    all_filtered_data[error_name] = edited_df
+                    
+                    # Descargar individual
+                    excel_data = export_to_excel({error_name: edited_df})
                     st.download_button(
                         label=f"⬇️ Descargar {error_name}",
                         data=excel_data,
-                        file_name=f"{municipio}_{error_name}_filtrado.xlsx",
+                        file_name=f"{error_file[:-5]}_{error_name}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         use_container_width=True,
                         key=f"download_{error_name}"
                     )
             
-            # Descargar todos los errores filtrados en un archivo
-            st.markdown("---")
-            st.subheader("📥 Descargar Consolidado")
-            excel_all = export_to_excel(all_filtered_data)
-            st.download_button(
-                label="⬇️ Descargar Todos los Errores de esta Ubicación",
-                data=excel_all,
-                file_name=f"{municipio}_Errores_Consolidados_{location_text.replace(' ', '_')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True
-            )
-    
-    # ============================================================
-    # OPCIÓN 2: FILTRAR POR POLÍGONO
-    # ============================================================
-    elif filtro_tipo == "poligono":
-        st.subheader("🗺️ Filtro por Polígono")
-        st.markdown("""
-        Selecciona el polígono para extraer sus validadores.
-        """)
-        
-        # Cargar datos de entregas
-        df_entregas = load_entregas_data()
-        
-        if df_entregas is None or df_entregas.empty:
-            st.error("❌ No se pudo cargar Entregas_a_cofopri.xlsx")
-            return
-        
-        # Obtener polígonos únicos (filtrados por municipio si es posible)
-        polygon_col = None
-        for col in df_entregas.columns:
-            if "poligono" in col.lower():
-                polygon_col = col
-                break
-        
-        if not polygon_col:
-            st.error("❌ La columna 'poligono' no existe en Entregas_a_cofopri.xlsx")
-            return
-        
-        poligonos = sorted([x for x in df_entregas[polygon_col].dropna().unique() if str(x).strip()])
-        
-        # Filtrar por municipio actual si es posible
-        poligonos_municipio = [p for p in poligonos if str(p).startswith(municipio)]
-        
-        if not poligonos_municipio:
-            st.warning(f"⚠️ No hay polígonos para {municipio} en Entregas_a_cofopri.xlsx")
-            return
-        
-        poligono_seleccionado = st.selectbox(
-            "Selecciona un polígono",
-            options=poligonos_municipio,
-            format_func=lambda x: f"Polígono: {x}"
-        )
-        
-        if st.button("✅ Aplicar Filtro de Polígono", type="primary", use_container_width=True):
-            # PASO 1 y 2: Filtrar Entregas_a_cofopri por polígono seleccionado
-            entregas_poligono = df_entregas[df_entregas[polygon_col] == poligono_seleccionado]
-            
-            if entregas_poligono.empty:
-                st.warning("⚠️ No hay registros de entregas para este polígono")
-                return
-            
-            st.success(f"✅ Se encontraron {len(entregas_poligono)} registro(s) en Entregas_a_cofopri")
-            
-            # PASO 3: Obtener los concat_sec del polígono
-            concat_secs = set(entregas_poligono["concat_sec"].dropna().unique())
-            
-            st.info(f"📊 Consultando {len(concat_secs)} combinaciones sector+manzana...")
-            
-            # PASO 4, 5 y 6: Comparar con errores municipales
-            consolidated_errors = {}
-            
-            for error_name, df_error in error_sheets.items():
-                # Detectar columnas sector y manzana
-                coords_cols = find_coordinate_columns(df_error)
-                
-                if "sector" in coords_cols and "manzana" in coords_cols:
-                    sector_col = coords_cols["sector"]
-                    manzana_col = coords_cols["manzana"]
-                    
-                    # Construir concatenación sector+manzana
-                    df_error_copy = df_error.copy()
-                    df_error_copy["crc_concat"] = (
-                        df_error_copy[sector_col].astype(str).str.strip() +
-                        df_error_copy[manzana_col].astype(str).str.strip()
-                    )
-                    
-                    # Filtrar solo los registros que coinciden
-                    df_filtered = df_error_copy[df_error_copy["crc_concat"].isin(concat_secs)]
-                    
-                    if not df_filtered.empty:
-                        # Remover la columna de concatenación antes de guardar
-                        df_filtered = df_filtered.drop(columns=["crc_concat"])
-                        consolidated_errors[error_name] = df_filtered
-            
-            if not consolidated_errors:
-                st.warning("⚠️ No se encontraron errores para este polígono")
-            else:
-                total_errors = sum(len(df) for df in consolidated_errors.values())
-                st.success(f"✅ Se encontraron {total_errors} predio(s) con error(es) en este polígono")
-                
-                # ============================================================
-                # MOSTRAR RESUMEN CONSOLIDADO
-                # ============================================================
-                st.subheader("📊 Resumen de Errores por Tipo")
-                resumen_data = {
-                    "Tipo de Error": list(consolidated_errors.keys()),
-                    "Cantidad de Predios": [len(df) for df in consolidated_errors.values()]
-                }
-                resumen_df = pd.DataFrame(resumen_data)
-                st.dataframe(resumen_df.astype(str), height=400, use_container_width=True, hide_index=True)
-                
+            # Guardar cambios si los hay
+            if st.session_state.file_modified:
                 st.markdown("---")
-                
-                # ============================================================
-                # DESCARGAR CONSOLIDADO (SIN VISTAS INDIVIDUALES)
-                # ============================================================
-                st.subheader("📥 Descargar Errores del Polígono")
-                st.markdown(f"Todos los errores asociados a **{poligono_seleccionado}** compilados en un único archivo")
-                
-                excel_consolidated = export_to_excel(consolidated_errors)
-                st.download_button(
-                    label=f"⬇️ Descargar Todos los Errores del Polígono {poligono_seleccionado}",
-                    data=excel_consolidated,
-                    file_name=f"Poligono_{poligono_seleccionado}_Errores_Consolidados.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True
-                )
+                if st.button("💾 Guardar Todos los Cambios", type="primary", use_container_width=True):
+                    if save_error_file(error_file, error_sheets):
+                        st.success(f"✅ Archivo guardado: {error_file}")
+                        st.session_state.file_modified = False
     
     # ============================================================
-    # FOOTER CON INFORMACIÓN
+    # INFORMACIÓN TÉCNICA
     # ============================================================
     st.markdown("---")
-    with st.expander("ℹ️ Información técnica"):
-        st.write(f"**Municipio:** {MUNICIPIOS.get(municipio, municipio)}")
-        st.write(f"**Total de tipos de error:** {len(error_sheets)}")
-        st.write(f"**Total de predios con errores:** {total_registros}")
+    with st.expander("ℹ️ Información Técnica"):
+        st.write(f"**Archivo actual:** {error_file}")
+        st.write(f"**Ubicación:** {ERROR_REPOSITORY_PATH}/")
+        st.write(f"**Hojas cargadas:** {len(error_sheets)}")
         
-        st.write(f"\n**Hojas/Errores cargadas:**")
-        for error_name, df_error in error_sheets.items():
-            sheet_coords = find_coordinate_columns(df_error)
-            st.write(f"  - **{error_name}:** {len(df_error)} predios (Coords: {sheet_coords})")
-
+        for sheet_name, df in error_sheets.items():
+            corrected = (df["Estado"] == "Corregido").sum() if "Estado" in df.columns else 0
+            total = len(df)
+            st.write(f"  - **{sheet_name}:** {total} registros ({corrected} corregidos)")
 
