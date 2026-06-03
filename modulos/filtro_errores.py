@@ -1,5 +1,5 @@
 # modulos/filtro_errores.py
-# Versión: 3.3 - Repositorio de errores con mejor manejo de errores y debug
+# Versión: 3.4 - Repositorio de errores con debug mejorado
 import streamlit as st
 import pandas as pd
 import os
@@ -7,6 +7,7 @@ from io import BytesIO
 from permisos import validar_acceso
 import warnings
 from datetime import datetime
+import traceback
 warnings.filterwarnings('ignore')
 
 # ============================================================
@@ -69,69 +70,104 @@ def load_error_file(filename):
     
     try:
         if filename.endswith('.xlsb'):
+            # ===== CARGAR .XLSB =====
             from pyxlsb import open_workbook
             sheets = {}
             try:
                 with open_workbook(file_path) as wb:
-                    sheet_count = len(wb.sheets)
-                    if sheet_count == 0:
-                        st.warning(f"⚠️ El archivo {filename} no contiene hojas")
+                    sheet_names = [sheet.name for sheet in wb.sheets]
+                    
+                    if not sheet_names:
+                        st.error(f"❌ El archivo {filename} no contiene hojas")
                         return {}
                     
-                    for sheet in wb.sheets:
+                    st.info(f"📂 Hojas encontradas en {filename}: {', '.join(sheet_names)}")
+                    
+                    for sheet_name in sheet_names:
                         try:
-                            df = pd.read_excel(file_path, sheet_name=sheet.name, engine="pyxlsb")
-                            if not df.empty:
-                                df = ensure_status_columns(df)
-                                df = convert_data_types_safely(df)
-                                sheets[sheet.name] = df
-                            else:
-                                st.warning(f"⚠️ La hoja '{sheet.name}' está vacía")
+                            df = pd.read_excel(file_path, sheet_name=sheet_name, engine="pyxlsb")
+                            
+                            if df.empty or len(df) == 0:
+                                st.warning(f"⚠️ La hoja '{sheet_name}' está vacía")
+                                continue
+                            
+                            st.info(f"✅ Hoja '{sheet_name}' cargada: {len(df)} filas")
+                            
+                            df = ensure_status_columns(df)
+                            df = convert_data_types_safely(df)
+                            sheets[sheet_name] = df
+                            
                         except Exception as e:
-                            st.warning(f"⚠️ Error al leer hoja '{sheet.name}': {str(e)}")
+                            st.error(f"❌ Error al leer hoja '{sheet_name}' en {filename}:")
+                            st.error(f"   {str(e)}")
                             continue
+                    
+                    if sheets:
+                        st.success(f"✅ {len(sheets)} hoja(s) cargada(s) exitosamente")
+                    
+                    return sheets
             except Exception as e:
-                st.error(f"❌ Error al abrir archivo .xlsb {filename}: {str(e)}")
+                st.error(f"❌ Error general al abrir {filename}:")
+                st.error(f"   {str(e)}")
                 return {}
-            return sheets
+        
         else:
-            # Archivo .xlsx
+            # ===== CARGAR .XLSX =====
             try:
+                # Primero obtener lista de hojas
                 xls = pd.ExcelFile(file_path, engine="openpyxl")
                 sheet_names = xls.sheet_names
                 
                 if not sheet_names:
-                    st.warning(f"⚠️ El archivo {filename} no contiene hojas")
+                    st.error(f"❌ El archivo {filename} no contiene hojas")
                     return {}
+                
+                st.info(f"📂 Hojas encontradas en {filename}: {', '.join(sheet_names)}")
                 
                 sheets = {}
                 for sheet_name in sheet_names:
                     try:
+                        # Intentar cargar la hoja
                         df = pd.read_excel(file_path, sheet_name=sheet_name, engine="openpyxl")
                         
-                        if df.empty:
-                            st.warning(f"⚠️ La hoja '{sheet_name}' está vacía en {filename}")
+                        # Verificar si está vacía
+                        if df.empty or len(df) == 0:
+                            st.warning(f"⚠️ La hoja '{sheet_name}' está vacía (0 filas)")
                             continue
                         
-                        # Si solo tiene columnas sin datos
-                        if len(df) == 0:
-                            st.warning(f"⚠️ La hoja '{sheet_name}' solo contiene encabezados")
-                            continue
+                        # Log de éxito
+                        st.info(f"✅ Hoja '{sheet_name}' cargada: {len(df)} filas, {len(df.columns)} columnas")
+                        st.write(f"   Columnas: {', '.join(df.columns[:5])}{'...' if len(df.columns) > 5 else ''}")
                         
+                        # Aplicar transformaciones
                         df = ensure_status_columns(df)
                         df = convert_data_types_safely(df)
                         sheets[sheet_name] = df
                         
                     except Exception as e:
-                        st.warning(f"⚠️ Error al leer hoja '{sheet_name}' en {filename}: {str(e)}")
+                        st.error(f"❌ Error al leer hoja '{sheet_name}' en {filename}:")
+                        st.error(f"   Tipo: {type(e).__name__}")
+                        st.error(f"   Mensaje: {str(e)}")
+                        st.error(f"   Traceback: {traceback.format_exc()}")
                         continue
                 
+                if sheets:
+                    st.success(f"✅ {len(sheets)} hoja(s) cargada(s) exitosamente")
+                else:
+                    st.warning(f"⚠️ No se pudo cargar ninguna hoja del archivo {filename}")
+                
                 return sheets
+                
             except Exception as e:
-                st.error(f"❌ Error al abrir archivo .xlsx {filename}: {str(e)}")
+                st.error(f"❌ Error general al procesar {filename}:")
+                st.error(f"   Tipo: {type(e).__name__}")
+                st.error(f"   Mensaje: {str(e)}")
                 return {}
+    
     except Exception as e:
-        st.error(f"❌ Error general al cargar {filename}: {str(e)}")
+        st.error(f"❌ Error crítico al cargar {filename}:")
+        st.error(f"   {str(e)}")
+        st.error(traceback.format_exc())
         return {}
 
 
@@ -154,7 +190,6 @@ def convert_data_types_safely(df):
             elif not pd.api.types.is_numeric_dtype(df[col]):
                 df[col] = df[col].astype(str)
         except Exception:
-            # Si hay error, convertir a string de todas formas
             try:
                 df[col] = df[col].astype(str)
             except Exception:
@@ -202,7 +237,6 @@ def save_error_file(filename, sheets_dict):
         with pd.ExcelWriter(file_path, engine="openpyxl") as writer:
             for sheet_name, df in sheets_dict.items():
                 safe_sheet_name = sheet_name[:31]
-                # Convertir de vuelta a tipos apropiados si es necesario
                 df.to_excel(writer, index=False, sheet_name=safe_sheet_name)
         
         return True
@@ -341,13 +375,10 @@ def display_editable_dataframe(df, key_prefix):
     """
     Muestra un DataFrame editable con columnas de Estado como dropdown
     """
-    # Crear una copia para edición - IMPORTANTE: reset_index para evitar IndexError
     df_display = df.copy().reset_index(drop=True)
     
-    # Usar st.data_editor con column_config para estados
     column_config = {}
     
-    # Configurar columna de Estado con opciones dropdown
     if "Estado" in df_display.columns:
         column_config["Estado"] = st.column_config.SelectboxColumn(
             "Estado",
@@ -355,28 +386,25 @@ def display_editable_dataframe(df, key_prefix):
             required=True
         )
     
-    # Configurar columna de Usuario
     if "Usuario_Corrigió" in df_display.columns:
         column_config["Usuario_Corrigió"] = st.column_config.TextColumn(
             "Usuario_Corrigió",
             width="medium"
         )
     
-    # Configurar columna de Fecha
     if "Fecha_Corrección" in df_display.columns:
         column_config["Fecha_Corrección"] = st.column_config.TextColumn(
             "Fecha_Corrección",
             width="medium"
         )
     
-    # Mostrar editor con configuración
     edited_df = st.data_editor(
         df_display,
         use_container_width=True,
         height=500,
         column_config=column_config,
         key=key_prefix,
-        disabled=[]  # Todas las columnas son editables
+        disabled=[]
     )
     
     return edited_df
@@ -385,13 +413,10 @@ def display_editable_dataframe(df, key_prefix):
 def update_user_and_date_on_change(edited_df, original_df, usuario_actual):
     """
     Actualiza usuario y fecha cuando hay cambios en el Estado.
-    Maneja el caso donde los índices pueden no coincidir.
     """
-    # Asegurar que ambos dataframes tengan reset_index
     edited_df = edited_df.reset_index(drop=True)
     original_df = original_df.reset_index(drop=True)
     
-    # Iterar sobre el rango mínimo de filas
     min_length = min(len(edited_df), len(original_df))
     
     for idx in range(min_length):
@@ -399,13 +424,10 @@ def update_user_and_date_on_change(edited_df, original_df, usuario_actual):
             edited_estado = edited_df.iloc[idx].get("Estado")
             original_estado = original_df.iloc[idx].get("Estado")
             
-            # Si el estado cambió
             if edited_estado != original_estado:
-                # Actualizar usuario si está vacío
                 if pd.isna(edited_df.iloc[idx].get("Usuario_Corrigió")) or edited_df.iloc[idx].get("Usuario_Corrigió") == "":
                     edited_df.at[idx, "Usuario_Corrigió"] = usuario_actual
                 
-                # Actualizar fecha
                 edited_df.at[idx, "Fecha_Corrección"] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         except Exception:
             continue
@@ -426,15 +448,10 @@ def render():
     Los cambios se guardan automáticamente en el archivo original.
     """)
     
-    # Asegurar que existe la carpeta
     ensure_error_repository_exists()
     
-    # Obtener usuario actual
     usuario_actual = st.session_state.get("usuario", {}).get("usuario", "Sistema")
     
-    # ============================================================
-    # INICIALIZAR ESTADO DE SESIÓN
-    # ============================================================
     if "current_error_file" not in st.session_state:
         st.session_state.current_error_file = None
     if "error_sheets_cache" not in st.session_state:
@@ -442,9 +459,6 @@ def render():
     if "file_modified" not in st.session_state:
         st.session_state.file_modified = False
     
-    # ============================================================
-    # SELECTOR DE ARCHIVO DE ERROR
-    # ============================================================
     st.subheader("📁 Selecciona un archivo de errores")
     
     available_files = get_available_error_files()
@@ -460,11 +474,12 @@ def render():
         help="Selecciona el archivo Excel que deseas procesar"
     )
     
-    # Cargar datos si el archivo cambió
     if error_file != st.session_state.current_error_file:
         st.session_state.current_error_file = error_file
+        
         with st.spinner(f"📂 Cargando {error_file}..."):
             st.session_state.error_sheets_cache = load_error_file(error_file)
+        
         st.session_state.file_modified = False
         
         try:
@@ -479,16 +494,9 @@ def render():
     
     if not error_sheets:
         st.error(f"❌ No se encontraron datos en {error_file}")
-        st.info("💡 Posibles causas:")
-        st.write("  - El archivo está vacío")
-        st.write("  - Las hojas no contienen datos")
-        st.write("  - El archivo está corrupto")
-        st.write("  - El formato no es compatible")
+        st.error("Por favor, verifica los logs anteriores para más información")
         return
     
-    # ============================================================
-    # ESTADÍSTICAS GENERALES
-    # ============================================================
     stats = generate_error_statistics(error_sheets)
     
     col1, col2, col3, col4, col5 = st.columns(5)
@@ -505,17 +513,14 @@ def render():
     
     st.markdown("---")
     
-    # ============================================================
-    # SELECTOR DE TIPO DE FILTRADO
-    # ============================================================
     st.subheader("🔎 Opciones de visualización")
     
     filtro_tipo = st.radio(
         "¿Cómo deseas visualizar los datos?",
-        options=["todas_las_hojas", "hoja_especifica", "filtrar_por_ubicacion"],
+        options=["hoja_especifica", "todas_las_hojas", "filtrar_por_ubicacion"],
         format_func=lambda x: {
-            "todas_las_hojas": "📋 Todas las hojas consolidadas",
             "hoja_especifica": "📄 Una hoja específica",
+            "todas_las_hojas": "📋 Todas las hojas consolidadas",
             "filtrar_por_ubicacion": "📍 Filtrar por Sector/Manzana/Lote"
         }[x],
         horizontal=True
@@ -523,26 +528,67 @@ def render():
     
     st.markdown("---")
     
-    # ============================================================
-    # OPCIÓN 1: MOSTRAR TODAS LAS HOJAS CONSOLIDADAS
-    # ============================================================
-    if filtro_tipo == "todas_las_hojas":
+    if filtro_tipo == "hoja_especifica":
+        st.subheader("📄 Selecciona una Hoja para Editar")
+        
+        hoja_seleccionada = st.selectbox(
+            "🗂️ Hoja",
+            options=list(error_sheets.keys()),
+            format_func=lambda x: f"{x} ({len(error_sheets[x])} registros)"
+        )
+        
+        if hoja_seleccionada:
+            df_hoja = error_sheets[hoja_seleccionada].copy().reset_index(drop=True)
+            
+            st.write(f"**Registros en esta hoja:** {len(df_hoja)}")
+            
+            if "Estado" in df_hoja.columns:
+                corrected = (df_hoja["Estado"] == "Corregido").sum()
+                not_corrected = (df_hoja["Estado"] == "No corregido").sum()
+                false_positive = (df_hoja["Estado"] == "Falso positivo").sum()
+                st.info(f"✅ Corregidos: {corrected} | ❌ No corregidos: {not_corrected} | 🔍 Falso positivo: {false_positive}")
+            
+            st.markdown("**Edita el estado de los errores:**")
+            
+            edited_df = display_editable_dataframe(df_hoja, f"editor_{hoja_seleccionada}")
+            
+            if not edited_df.equals(df_hoja):
+                edited_df = update_user_and_date_on_change(edited_df, df_hoja, usuario_actual)
+                st.session_state.file_modified = True
+                error_sheets[hoja_seleccionada] = edited_df.reset_index(drop=True)
+                st.success("✏️ Cambios detectados")
+            
+            if st.session_state.file_modified:
+                if st.button("💾 Guardar Cambios", type="primary", use_container_width=True, key=f"save_{hoja_seleccionada}"):
+                    if save_error_file(error_file, error_sheets):
+                        st.success(f"✅ Archivo guardado correctamente: {error_file}")
+                        st.session_state.file_modified = False
+                    else:
+                        st.error("❌ Error al guardar el archivo")
+            
+            st.markdown("---")
+            excel_hoja = export_to_excel({hoja_seleccionada: edited_df})
+            st.download_button(
+                label=f"⬇️ Descargar {hoja_seleccionada}",
+                data=excel_hoja,
+                file_name=f"{error_file[:-5]}_{hoja_seleccionada}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+    
+    elif filtro_tipo == "todas_las_hojas":
         st.subheader("📋 Todos los Errores - Vista Consolidada")
         
-        # Consolidar todas las hojas
         df_consolidated = pd.concat(error_sheets.values(), ignore_index=True).reset_index(drop=True)
         
         st.write(f"**Total de registros:** {len(df_consolidated)}")
         
-        # Mostrar tabla editable
         edited_df = display_editable_dataframe(df_consolidated, "editor_consolidado")
         
-        # Verificar cambios
         if not edited_df.equals(df_consolidated):
             st.session_state.file_modified = True
             edited_df = update_user_and_date_on_change(edited_df, df_consolidated, usuario_actual)
         
-        # Botón para descargar consolidado
         st.markdown("---")
         excel_all = export_to_excel({"Consolidado": edited_df})
         st.download_button(
@@ -553,10 +599,8 @@ def render():
             use_container_width=True
         )
         
-        # Guardar cambios
         if st.session_state.file_modified:
             if st.button("💾 Guardar Cambios", type="primary", use_container_width=True):
-                # Reconstruir los sheets con los datos editados
                 updated_sheets = {}
                 current_idx = 0
                 for sheet_name, df_original in error_sheets.items():
@@ -571,70 +615,10 @@ def render():
                 else:
                     st.error("❌ Error al guardar el archivo")
     
-    # ============================================================
-    # OPCIÓN 2: MOSTRAR UNA HOJA ESPECÍFICA CON EDICIÓN
-    # ============================================================
-    elif filtro_tipo == "hoja_especifica":
-        st.subheader("📄 Selecciona una Hoja para Editar")
-        
-        hoja_seleccionada = st.selectbox(
-            "🗂️ Hoja",
-            options=list(error_sheets.keys()),
-            format_func=lambda x: f"{x} ({len(error_sheets[x])} registros)"
-        )
-        
-        if hoja_seleccionada:
-            df_hoja = error_sheets[hoja_seleccionada].copy().reset_index(drop=True)
-            
-            st.write(f"**Registros en esta hoja:** {len(df_hoja)}")
-            
-            # Contar estados
-            if "Estado" in df_hoja.columns:
-                corrected = (df_hoja["Estado"] == "Corregido").sum()
-                not_corrected = (df_hoja["Estado"] == "No corregido").sum()
-                false_positive = (df_hoja["Estado"] == "Falso positivo").sum()
-                st.info(f"✅ Corregidos: {corrected} | ❌ No corregidos: {not_corrected} | 🔍 Falso positivo: {false_positive}")
-            
-            # TABLA EDITABLE
-            st.markdown("**Edita el estado de los errores:**")
-            
-            edited_df = display_editable_dataframe(df_hoja, f"editor_{hoja_seleccionada}")
-            
-            # Actualizar usuario y fecha cuando hay cambio en Estado
-            if not edited_df.equals(df_hoja):
-                edited_df = update_user_and_date_on_change(edited_df, df_hoja, usuario_actual)
-                st.session_state.file_modified = True
-                error_sheets[hoja_seleccionada] = edited_df.reset_index(drop=True)
-                st.success("✏️ Cambios detectados")
-            
-            # Botón guardar
-            if st.session_state.file_modified:
-                if st.button("💾 Guardar Cambios", type="primary", use_container_width=True, key=f"save_{hoja_seleccionada}"):
-                    if save_error_file(error_file, error_sheets):
-                        st.success(f"✅ Archivo guardado correctamente: {error_file}")
-                        st.session_state.file_modified = False
-                    else:
-                        st.error("❌ Error al guardar el archivo")
-            
-            # Descargar hoja individual
-            st.markdown("---")
-            excel_hoja = export_to_excel({hoja_seleccionada: edited_df})
-            st.download_button(
-                label=f"⬇️ Descargar {hoja_seleccionada}",
-                data=excel_hoja,
-                file_name=f"{error_file[:-5]}_{hoja_seleccionada}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True
-            )
-    
-    # ============================================================
-    # OPCIÓN 3: FILTRAR POR UBICACIÓN CATASTRAL
-    # ============================================================
     elif filtro_tipo == "filtrar_por_ubicacion":
         st.subheader("📍 Filtro por Sector, Manzana y Lote")
         st.markdown("Selecciona la ubicación para ver solo esos errores")
         
-        # Consolidar para obtener coordenadas
         df_consolidated = pd.concat(error_sheets.values(), ignore_index=True).reset_index(drop=True)
         coords_cols = find_coordinate_columns(df_consolidated)
         
@@ -642,7 +626,6 @@ def render():
             st.warning("⚠️ No se encontraron columnas de coordenadas (sector, manzana, lote)")
             return
         
-        # Filtros cascada
         col1, col2, col3 = st.columns(3)
         
         with col1:
@@ -657,7 +640,6 @@ def render():
             else:
                 sector = None
         
-        # Filtrar manzanas
         temp_df = df_consolidated.copy()
         if sector is not None and sector_col:
             temp_df = temp_df[temp_df[sector_col].astype(str) == str(sector)]
@@ -674,7 +656,6 @@ def render():
             else:
                 manzana = None
         
-        # Filtrar lotes
         temp_df2 = df_consolidated.copy()
         if sector is not None and sector_col:
             temp_df2 = temp_df2[temp_df2[sector_col].astype(str) == str(sector)]
@@ -693,7 +674,6 @@ def render():
             else:
                 lote = None
         
-        # Aplicar filtros
         filtered_errors = {}
         for error_name, df_error in error_sheets.items():
             df_filtered = filter_data(df_error, sector, manzana, lote)
@@ -706,7 +686,6 @@ def render():
             total_filtered = sum(len(df) for df in filtered_errors.values())
             st.success(f"✅ Se encontraron {total_filtered} predio(s) con error(es)")
             
-            # Mostrar resumen
             st.subheader("📊 Resumen de Errores")
             resumen_data = {
                 "Tipo de Error": list(filtered_errors.keys()),
@@ -717,30 +696,22 @@ def render():
             
             st.markdown("---")
             
-            # Tabs para cada tipo de error
             tabs = st.tabs([f"🔴 {sanitize_tab_label(name)} ({len(filtered_errors[name])})" 
                            for name in filtered_errors.keys()])
-            
-            all_filtered_data = {}
             
             for tab, (error_name, df_filtered) in zip(tabs, filtered_errors.items()):
                 with tab:
                     st.markdown(f"### {error_name}")
                     st.write(f"**Registros:** {len(df_filtered)}")
                     
-                    # Tabla editable
                     df_filtered_reset = df_filtered.reset_index(drop=True)
                     edited_df = display_editable_dataframe(df_filtered_reset, f"editor_filtered_{error_name}")
                     
-                    # Actualizar usuario y fecha
                     if not edited_df.equals(df_filtered_reset):
                         edited_df = update_user_and_date_on_change(edited_df, df_filtered_reset, usuario_actual)
                         st.session_state.file_modified = True
                         error_sheets[error_name] = edited_df.reset_index(drop=True)
                     
-                    all_filtered_data[error_name] = edited_df
-                    
-                    # Descargar individual
                     excel_data = export_to_excel({error_name: edited_df})
                     st.download_button(
                         label=f"⬇️ Descargar {error_name}",
@@ -751,7 +722,6 @@ def render():
                         key=f"download_{error_name}"
                     )
             
-            # Guardar cambios si los hay
             if st.session_state.file_modified:
                 st.markdown("---")
                 if st.button("💾 Guardar Todos los Cambios", type="primary", use_container_width=True, key="save_all_filtered"):
@@ -761,9 +731,6 @@ def render():
                     else:
                         st.error("❌ Error al guardar el archivo")
     
-    # ============================================================
-    # INFORMACIÓN TÉCNICA
-    # ============================================================
     st.markdown("---")
     with st.expander("ℹ️ Información Técnica"):
         st.write(f"**Archivo actual:** {error_file}")
@@ -776,4 +743,3 @@ def render():
             false_positive = (df["Estado"] == "Falso positivo").sum() if "Estado" in df.columns else 0
             total = len(df)
             st.write(f"  - **{sheet_name}:** {total} registros ({corrected} corregidos, {false_positive} falso positivo)")
-
