@@ -12,7 +12,7 @@ warnings.filterwarnings('ignore')
 # CONSTANTES
 # ============================================================
 MUNICIPIOS = {
-    "VES": "🏛️ Vestigios",
+    "VES": "🏛️ Villa El Salvador",
     "SJM": "🏠 San Juan de Miraflores",
     "CH": "🌊 Chorrillos"
 }
