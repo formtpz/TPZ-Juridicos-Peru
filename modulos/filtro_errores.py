@@ -237,7 +237,7 @@ def export_to_excel(dfs_dict):
 def render():
     validar_acceso("Filtro de Errores")
     
-    st.title("🔍 Filtro de Errores - Consulta por Ubicación")
+    st.title("🔍 Filtro de Errores - Consulta Sector/Mzn/lote o Poligono")
     st.markdown("""
     Filtra y visualiza errores por ubicación catastral.
     Selecciona un municipio, sector, manzana y/o lote para ver todos los errores asociados.
@@ -257,7 +257,7 @@ def render():
     available_mun = get_available_municipalities()
     
     if not available_mun:
-        st.error("❌ No hay archivos de municipios disponibles en Rentas_resumidos/")
+        st.error("❌ No hay archivos de municipios disponibles en para esta consulta, avisar a SIG. /")
         st.info("📌 Se esperan archivos: VES.xlsb/xlsx, SJM.xlsx, CH.xlsx")
         return
     
@@ -290,8 +290,8 @@ def render():
     error_sheets = st.session_state.error_sheets_cache
     
     if not error_sheets:
-        st.error(f"❌ No se encontraron hojas o datos en {municipio}")
-        st.info("💡 Verifica que el archivo tenga al menos una hoja con datos")
+        st.error(f"❌ No se encontraron hojas o datos en {municipio}, avisar a SIG.")
+        st.info("💡 Selecciona la base de datos a consultar.")
         return
     
     total_registros = sum(len(df) for df in error_sheets.values())
@@ -320,7 +320,7 @@ def render():
     # ============================================================
     if filtro_tipo == "sector_manzana":
         st.subheader("📍 Filtro por Sector, Manzana y Lote")
-        st.markdown("Selecciona la ubicación del predio para ver todos los errores asociados")
+        st.markdown("Selecciona el filtro para observar las validaciones asociadas")
         
         # Consolidar todos los datos de todas las hojas para buscar coordenadas
         df_consolidated = pd.concat(error_sheets.values(), ignore_index=True)
@@ -402,7 +402,7 @@ def render():
             st.warning("⚠️ No hay registros con los criterios seleccionados")
         else:
             total_filtered = sum(len(df) for df in filtered_errors.values())
-            st.success(f"✅ Se encontraron {total_filtered} predio(s) con error(es)")
+            st.success(f"✅ Se encontraron {total_filtered} predio(s) con validacion(es) pendiente(s)")
             
             # Mostrar info de ubicación
             location_info = []
