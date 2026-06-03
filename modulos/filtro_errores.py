@@ -475,12 +475,7 @@ def render():
     elif filtro_tipo == "poligono":
         st.subheader("🗺️ Filtro por Polígono")
         st.markdown("""
-        **Flujo de filtrado:**
-        1. Selecciona un polígono
-        2. Se consulta Entregas_a_cofopri para obtener los concat_sec del polígono
-        3. Se extrae concatenación sector+manzana de cada error
-        4. Se comparan y se extraen solo los registros coincidentes
-        5. Se descarga un archivo consolidado con todos los errores del polígono
+        Selecciona el polígono para extraer sus validadores.
         """)
         
         # Cargar datos de entregas
