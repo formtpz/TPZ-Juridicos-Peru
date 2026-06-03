@@ -1,4 +1,5 @@
 # modulos/filtro_errores.py
+# Versión: 2.0 - Implementación completa de correcciones
 import streamlit as st
 import pandas as pd
 import os
