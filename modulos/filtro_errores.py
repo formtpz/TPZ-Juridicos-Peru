@@ -1,5 +1,5 @@
 # modulos/filtro_errores.py
-# Versión: 3.1 - Repositorio de errores con estado editable y validación mejorada
+# Versión: 3.2 - Repositorio de errores con estado editable y validación mejorada
 import streamlit as st
 import pandas as pd
 import os
@@ -264,7 +264,7 @@ def filter_data(df, sector=None, manzana=None, lote=None):
             lote_str = str(lote).zfill(3)
             filtered = filtered[filtered[lote_col].astype(str).str.zfill(3) == lote_str]
     
-    return filtered
+    return filtered.reset_index(drop=True)
 
 
 def export_to_excel(dfs_dict):
@@ -306,8 +306,8 @@ def display_editable_dataframe(df, key_prefix):
     """
     Muestra un DataFrame editable con columnas de Estado como dropdown
     """
-    # Crear una copia para edición
-    df_display = df.copy()
+    # Crear una copia para edición - IMPORTANTE: reset_index para evitar IndexError
+    df_display = df.copy().reset_index(drop=True)
     
     # Usar st.data_editor con column_config para estados
     column_config = {}
@@ -343,6 +343,37 @@ def display_editable_dataframe(df, key_prefix):
         key=key_prefix,
         disabled=[]  # Todas las columnas son editables
     )
+    
+    return edited_df
+
+
+def update_user_and_date_on_change(edited_df, original_df, usuario_actual):
+    """
+    Actualiza usuario y fecha cuando hay cambios en el Estado.
+    Maneja el caso donde los índices pueden no coincidir.
+    """
+    # Asegurar que ambos dataframes tengan reset_index
+    edited_df = edited_df.reset_index(drop=True)
+    original_df = original_df.reset_index(drop=True)
+    
+    # Iterar sobre el rango mínimo de filas
+    min_length = min(len(edited_df), len(original_df))
+    
+    for idx in range(min_length):
+        try:
+            edited_estado = edited_df.iloc[idx].get("Estado")
+            original_estado = original_df.iloc[idx].get("Estado")
+            
+            # Si el estado cambió
+            if edited_estado != original_estado:
+                # Actualizar usuario si está vacío
+                if pd.isna(edited_df.iloc[idx].get("Usuario_Corrigió")) or edited_df.iloc[idx].get("Usuario_Corrigió") == "":
+                    edited_df.at[idx, "Usuario_Corrigió"] = usuario_actual
+                
+                # Actualizar fecha
+                edited_df.at[idx, "Fecha_Corrección"] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        except Exception:
+            continue
     
     return edited_df
 
@@ -458,7 +489,7 @@ def render():
         st.subheader("📋 Todos los Errores - Vista Consolidada")
         
         # Consolidar todas las hojas
-        df_consolidated = pd.concat(error_sheets.values(), ignore_index=True)
+        df_consolidated = pd.concat(error_sheets.values(), ignore_index=True).reset_index(drop=True)
         
         st.write(f"**Total de registros:** {len(df_consolidated)}")
         
@@ -468,14 +499,7 @@ def render():
         # Verificar cambios
         if not edited_df.equals(df_consolidated):
             st.session_state.file_modified = True
-            
-            # Actualizar usuario y fecha cuando hay cambio en Estado
-            for idx, row in edited_df.iterrows():
-                if idx < len(df_consolidated):
-                    if row.get("Estado") != df_consolidated.iloc[idx].get("Estado"):
-                        if pd.isna(row.get("Usuario_Corrigió")) or row.get("Usuario_Corrigió") == "":
-                            edited_df.at[idx, "Usuario_Corrigió"] = usuario_actual
-                        edited_df.at[idx, "Fecha_Corrección"] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            edited_df = update_user_and_date_on_change(edited_df, df_consolidated, usuario_actual)
         
         # Botón para descargar consolidado
         st.markdown("---")
@@ -491,13 +515,18 @@ def render():
         # Guardar cambios
         if st.session_state.file_modified:
             if st.button("💾 Guardar Cambios", type="primary", use_container_width=True):
-                # Separar de vuelta en hojas
+                # Reconstruir los sheets con los datos editados
+                updated_sheets = {}
+                current_idx = 0
                 for sheet_name, df_original in error_sheets.items():
-                    error_sheets[sheet_name] = edited_df.iloc[:len(df_original)]
+                    sheet_len = len(df_original)
+                    updated_sheets[sheet_name] = edited_df.iloc[current_idx:current_idx + sheet_len].reset_index(drop=True)
+                    current_idx += sheet_len
                 
-                if save_error_file(error_file, error_sheets):
+                if save_error_file(error_file, updated_sheets):
                     st.success(f"✅ Archivo guardado correctamente: {error_file}")
                     st.session_state.file_modified = False
+                    st.session_state.error_sheets_cache = updated_sheets
                 else:
                     st.error("❌ Error al guardar el archivo")
     
@@ -514,7 +543,7 @@ def render():
         )
         
         if hoja_seleccionada:
-            df_hoja = error_sheets[hoja_seleccionada].copy()
+            df_hoja = error_sheets[hoja_seleccionada].copy().reset_index(drop=True)
             
             st.write(f"**Registros en esta hoja:** {len(df_hoja)}")
             
@@ -532,15 +561,9 @@ def render():
             
             # Actualizar usuario y fecha cuando hay cambio en Estado
             if not edited_df.equals(df_hoja):
-                for idx, row in edited_df.iterrows():
-                    if row.get("Estado") != df_hoja.iloc[idx].get("Estado"):
-                        if pd.isna(row.get("Usuario_Corrigió")) or row.get("Usuario_Corrigió") == "":
-                            edited_df.at[idx, "Usuario_Corrigió"] = usuario_actual
-                        edited_df.at[idx, "Fecha_Corrección"] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                
+                edited_df = update_user_and_date_on_change(edited_df, df_hoja, usuario_actual)
                 st.session_state.file_modified = True
-                error_sheets[hoja_seleccionada] = edited_df
-                
+                error_sheets[hoja_seleccionada] = edited_df.reset_index(drop=True)
                 st.success("✏️ Cambios detectados")
             
             # Botón guardar
@@ -571,7 +594,7 @@ def render():
         st.markdown("Selecciona la ubicación para ver solo esos errores")
         
         # Consolidar para obtener coordenadas
-        df_consolidated = pd.concat(error_sheets.values(), ignore_index=True)
+        df_consolidated = pd.concat(error_sheets.values(), ignore_index=True).reset_index(drop=True)
         coords_cols = find_coordinate_columns(df_consolidated)
         
         if not coords_cols:
@@ -665,18 +688,14 @@ def render():
                     st.write(f"**Registros:** {len(df_filtered)}")
                     
                     # Tabla editable
-                    edited_df = display_editable_dataframe(df_filtered, f"editor_filtered_{error_name}")
+                    df_filtered_reset = df_filtered.reset_index(drop=True)
+                    edited_df = display_editable_dataframe(df_filtered_reset, f"editor_filtered_{error_name}")
                     
                     # Actualizar usuario y fecha
-                    if not edited_df.equals(df_filtered):
-                        for idx, row in edited_df.iterrows():
-                            if row.get("Estado") != df_filtered.iloc[idx].get("Estado"):
-                                if pd.isna(row.get("Usuario_Corrigió")) or row.get("Usuario_Corrigió") == "":
-                                    edited_df.at[idx, "Usuario_Corrigió"] = usuario_actual
-                                edited_df.at[idx, "Fecha_Corrección"] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                        
+                    if not edited_df.equals(df_filtered_reset):
+                        edited_df = update_user_and_date_on_change(edited_df, df_filtered_reset, usuario_actual)
                         st.session_state.file_modified = True
-                        error_sheets[error_name] = edited_df
+                        error_sheets[error_name] = edited_df.reset_index(drop=True)
                     
                     all_filtered_data[error_name] = edited_df
                     
@@ -716,4 +735,3 @@ def render():
             false_positive = (df["Estado"] == "Falso positivo").sum() if "Estado" in df.columns else 0
             total = len(df)
             st.write(f"  - **{sheet_name}:** {total} registros ({corrected} corregidos, {false_positive} falso positivo)")
-
