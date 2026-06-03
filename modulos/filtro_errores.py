@@ -1,11 +1,12 @@
 # modulos/filtro_errores.py
-# Versión: 3.0 - Repositorio de errores con estado editable
+# Versión: 3.1 - Repositorio de errores con estado editable y validación mejorada
 import streamlit as st
 import pandas as pd
 import os
 from io import BytesIO
 from permisos import validar_acceso
 import warnings
+from datetime import datetime
 warnings.filterwarnings('ignore')
 
 # ============================================================
@@ -19,6 +20,8 @@ MUNICIPIOS = {
 
 ERROR_REPOSITORY_PATH = "Repositorio_de_Errores"
 RENTAS_PATH = "Rentas_resumidos"
+
+ESTADOS_VALIDOS = ["No corregido", "Corregido", "Falso positivo"]
 
 
 # ============================================================
@@ -46,7 +49,7 @@ def get_available_error_files():
     
     available_files = []
     for filename in os.listdir(ERROR_REPOSITORY_PATH):
-        if filename.endswith(('.xlsx', '.xlsb')):
+        if filename.endswith(('.xlsx', '.xlsb')) and not filename.startswith('~'):
             available_files.append(filename)
     
     return sorted(available_files)
@@ -72,7 +75,8 @@ def load_error_file(filename):
                     try:
                         df = pd.read_excel(file_path, sheet_name=sheet.name, engine="pyxlsb")
                         if not df.empty:
-                            df = ensure_status_column(df)
+                            df = ensure_status_columns(df)
+                            df = convert_data_types_safely(df)
                             sheets[sheet.name] = df
                     except Exception:
                         continue
@@ -85,7 +89,8 @@ def load_error_file(filename):
                 try:
                     df = pd.read_excel(file_path, sheet_name=sheet_name, engine="openpyxl")
                     if not df.empty:
-                        df = ensure_status_column(df)
+                        df = ensure_status_columns(df)
+                        df = convert_data_types_safely(df)
                         sheets[sheet_name] = df
                 except Exception:
                     continue
@@ -95,13 +100,51 @@ def load_error_file(filename):
         return {}
 
 
-def ensure_status_column(df):
+def convert_data_types_safely(df):
     """
-    Verifica que existe columna 'Estado' en el DataFrame.
-    Si no existe, la crea con valor 'No corregido' por defecto.
+    Convierte tipos de datos de forma segura para evitar OverflowError con PyArrow
+    Convierte tipos complejos a string para compatibilidad con st.data_editor
     """
+    df = df.copy()
+    
+    for col in df.columns:
+        try:
+            # Si es una columna de fecha, convertir a string ISO
+            if pd.api.types.is_datetime64_any_dtype(df[col]):
+                df[col] = df[col].dt.strftime('%Y-%m-%d %H:%M:%S')
+            # Si es una columna de timedelta, convertir a string
+            elif pd.api.types.is_timedelta64_dtype(df[col]):
+                df[col] = df[col].astype(str)
+            # Convertir todo a string para evitar problemas con PyArrow
+            elif not pd.api.types.is_numeric_dtype(df[col]):
+                df[col] = df[col].astype(str)
+        except Exception:
+            # Si hay error, convertir a string de todas formas
+            try:
+                df[col] = df[col].astype(str)
+            except Exception:
+                pass
+    
+    return df
+
+
+def ensure_status_columns(df):
+    """
+    Verifica que existan las columnas de estado.
+    Si no existen, las crea con valores por defecto.
+    """
+    # Columna de Estado
     if "Estado" not in df.columns:
         df.insert(len(df.columns), "Estado", "No corregido")
+    
+    # Columna de Usuario
+    if "Usuario_Corrigió" not in df.columns:
+        df.insert(len(df.columns), "Usuario_Corrigió", "")
+    
+    # Columna de Fecha
+    if "Fecha_Corrección" not in df.columns:
+        df.insert(len(df.columns), "Fecha_Corrección", "")
+    
     return df
 
 
@@ -124,6 +167,7 @@ def save_error_file(filename, sheets_dict):
         with pd.ExcelWriter(file_path, engine="openpyxl") as writer:
             for sheet_name, df in sheets_dict.items():
                 safe_sheet_name = sheet_name[:31]
+                # Convertir de vuelta a tipos apropiados si es necesario
                 df.to_excel(writer, index=False, sheet_name=safe_sheet_name)
         
         return True
@@ -241,18 +285,66 @@ def generate_error_statistics(error_sheets):
     total_errors = sum(len(df) for df in error_sheets.values())
     corrected_count = 0
     not_corrected_count = 0
+    false_positive_count = 0
     
     for df in error_sheets.values():
         if "Estado" in df.columns:
             corrected_count += (df["Estado"] == "Corregido").sum()
             not_corrected_count += (df["Estado"] == "No corregido").sum()
+            false_positive_count += (df["Estado"] == "Falso positivo").sum()
     
     return {
         "total_errors": total_errors,
         "corrected": corrected_count,
         "not_corrected": not_corrected_count,
+        "false_positive": false_positive_count,
         "percentage_corrected": (corrected_count / total_errors * 100) if total_errors > 0 else 0
     }
+
+
+def display_editable_dataframe(df, key_prefix):
+    """
+    Muestra un DataFrame editable con columnas de Estado como dropdown
+    """
+    # Crear una copia para edición
+    df_display = df.copy()
+    
+    # Usar st.data_editor con column_config para estados
+    column_config = {}
+    
+    # Configurar columna de Estado con opciones dropdown
+    if "Estado" in df_display.columns:
+        column_config["Estado"] = st.column_config.SelectboxColumn(
+            "Estado",
+            options=ESTADOS_VALIDOS,
+            required=True
+        )
+    
+    # Configurar columna de Usuario
+    if "Usuario_Corrigió" in df_display.columns:
+        column_config["Usuario_Corrigió"] = st.column_config.TextColumn(
+            "Usuario_Corrigió",
+            width="medium"
+        )
+    
+    # Configurar columna de Fecha
+    if "Fecha_Corrección" in df_display.columns:
+        column_config["Fecha_Corrección"] = st.column_config.TextColumn(
+            "Fecha_Corrección",
+            width="medium"
+        )
+    
+    # Mostrar editor con configuración
+    edited_df = st.data_editor(
+        df_display,
+        use_container_width=True,
+        height=500,
+        column_config=column_config,
+        key=key_prefix,
+        disabled=[]  # Todas las columnas son editables
+    )
+    
+    return edited_df
 
 
 # ============================================================
@@ -270,6 +362,9 @@ def render():
     
     # Asegurar que existe la carpeta
     ensure_error_repository_exists()
+    
+    # Obtener usuario actual
+    usuario_actual = st.session_state.get("usuario", {}).get("usuario", "Sistema")
     
     # ============================================================
     # INICIALIZAR ESTADO DE SESIÓN
@@ -324,14 +419,16 @@ def render():
     # ============================================================
     stats = generate_error_statistics(error_sheets)
     
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
-        st.metric("📊 Total de Errores", stats["total_errors"])
+        st.metric("📊 Total", stats["total_errors"])
     with col2:
-        st.metric("✅ Corregidos", stats["corrected"], delta=f"{stats['percentage_corrected']:.1f}%")
+        st.metric("✅ Corregidos", stats["corrected"])
     with col3:
         st.metric("❌ No Corregidos", stats["not_corrected"])
     with col4:
+        st.metric("🔍 Falso Positivo", stats["false_positive"])
+    with col5:
         st.metric("📈 Progreso", f"{stats['percentage_corrected']:.1f}%")
     
     st.markdown("---")
@@ -365,12 +462,24 @@ def render():
         
         st.write(f"**Total de registros:** {len(df_consolidated)}")
         
-        # Mostrar tabla completa
-        st.dataframe(df_consolidated.astype(str), height=500, use_container_width=True)
+        # Mostrar tabla editable
+        edited_df = display_editable_dataframe(df_consolidated, "editor_consolidado")
+        
+        # Verificar cambios
+        if not edited_df.equals(df_consolidated):
+            st.session_state.file_modified = True
+            
+            # Actualizar usuario y fecha cuando hay cambio en Estado
+            for idx, row in edited_df.iterrows():
+                if idx < len(df_consolidated):
+                    if row.get("Estado") != df_consolidated.iloc[idx].get("Estado"):
+                        if pd.isna(row.get("Usuario_Corrigió")) or row.get("Usuario_Corrigió") == "":
+                            edited_df.at[idx, "Usuario_Corrigió"] = usuario_actual
+                        edited_df.at[idx, "Fecha_Corrección"] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         
         # Botón para descargar consolidado
         st.markdown("---")
-        excel_all = export_to_excel({"Consolidado": df_consolidated})
+        excel_all = export_to_excel({"Consolidado": edited_df})
         st.download_button(
             label="⬇️ Descargar Consolidado",
             data=excel_all,
@@ -378,6 +487,19 @@ def render():
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True
         )
+        
+        # Guardar cambios
+        if st.session_state.file_modified:
+            if st.button("💾 Guardar Cambios", type="primary", use_container_width=True):
+                # Separar de vuelta en hojas
+                for sheet_name, df_original in error_sheets.items():
+                    error_sheets[sheet_name] = edited_df.iloc[:len(df_original)]
+                
+                if save_error_file(error_file, error_sheets):
+                    st.success(f"✅ Archivo guardado correctamente: {error_file}")
+                    st.session_state.file_modified = False
+                else:
+                    st.error("❌ Error al guardar el archivo")
     
     # ============================================================
     # OPCIÓN 2: MOSTRAR UNA HOJA ESPECÍFICA CON EDICIÓN
@@ -400,27 +522,30 @@ def render():
             if "Estado" in df_hoja.columns:
                 corrected = (df_hoja["Estado"] == "Corregido").sum()
                 not_corrected = (df_hoja["Estado"] == "No corregido").sum()
-                st.info(f"✅ Corregidos: {corrected} | ❌ No corregidos: {not_corrected}")
+                false_positive = (df_hoja["Estado"] == "Falso positivo").sum()
+                st.info(f"✅ Corregidos: {corrected} | ❌ No corregidos: {not_corrected} | 🔍 Falso positivo: {false_positive}")
             
             # TABLA EDITABLE
             st.markdown("**Edita el estado de los errores:**")
             
-            edited_df = st.data_editor(
-                df_hoja,
-                use_container_width=True,
-                height=500,
-                key=f"editor_{hoja_seleccionada}"
-            )
+            edited_df = display_editable_dataframe(df_hoja, f"editor_{hoja_seleccionada}")
             
-            # Verificar si hubo cambios
+            # Actualizar usuario y fecha cuando hay cambio en Estado
             if not edited_df.equals(df_hoja):
+                for idx, row in edited_df.iterrows():
+                    if row.get("Estado") != df_hoja.iloc[idx].get("Estado"):
+                        if pd.isna(row.get("Usuario_Corrigió")) or row.get("Usuario_Corrigió") == "":
+                            edited_df.at[idx, "Usuario_Corrigió"] = usuario_actual
+                        edited_df.at[idx, "Fecha_Corrección"] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                
                 st.session_state.file_modified = True
                 error_sheets[hoja_seleccionada] = edited_df
                 
                 st.success("✏️ Cambios detectados")
-                
-                # Botón guardar
-                if st.button("💾 Guardar Cambios", type="primary", use_container_width=True):
+            
+            # Botón guardar
+            if st.session_state.file_modified:
+                if st.button("💾 Guardar Cambios", type="primary", use_container_width=True, key=f"save_{hoja_seleccionada}"):
                     if save_error_file(error_file, error_sheets):
                         st.success(f"✅ Archivo guardado correctamente: {error_file}")
                         st.session_state.file_modified = False
@@ -429,7 +554,7 @@ def render():
             
             # Descargar hoja individual
             st.markdown("---")
-            excel_hoja = export_to_excel({hoja_seleccionada: df_hoja})
+            excel_hoja = export_to_excel({hoja_seleccionada: edited_df})
             st.download_button(
                 label=f"⬇️ Descargar {hoja_seleccionada}",
                 data=excel_hoja,
@@ -540,14 +665,16 @@ def render():
                     st.write(f"**Registros:** {len(df_filtered)}")
                     
                     # Tabla editable
-                    edited_df = st.data_editor(
-                        df_filtered,
-                        use_container_width=True,
-                        height=400,
-                        key=f"editor_filtered_{error_name}"
-                    )
+                    edited_df = display_editable_dataframe(df_filtered, f"editor_filtered_{error_name}")
                     
+                    # Actualizar usuario y fecha
                     if not edited_df.equals(df_filtered):
+                        for idx, row in edited_df.iterrows():
+                            if row.get("Estado") != df_filtered.iloc[idx].get("Estado"):
+                                if pd.isna(row.get("Usuario_Corrigió")) or row.get("Usuario_Corrigió") == "":
+                                    edited_df.at[idx, "Usuario_Corrigió"] = usuario_actual
+                                edited_df.at[idx, "Fecha_Corrección"] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        
                         st.session_state.file_modified = True
                         error_sheets[error_name] = edited_df
                     
@@ -567,10 +694,12 @@ def render():
             # Guardar cambios si los hay
             if st.session_state.file_modified:
                 st.markdown("---")
-                if st.button("💾 Guardar Todos los Cambios", type="primary", use_container_width=True):
+                if st.button("💾 Guardar Todos los Cambios", type="primary", use_container_width=True, key="save_all_filtered"):
                     if save_error_file(error_file, error_sheets):
                         st.success(f"✅ Archivo guardado: {error_file}")
                         st.session_state.file_modified = False
+                    else:
+                        st.error("❌ Error al guardar el archivo")
     
     # ============================================================
     # INFORMACIÓN TÉCNICA
@@ -579,10 +708,12 @@ def render():
     with st.expander("ℹ️ Información Técnica"):
         st.write(f"**Archivo actual:** {error_file}")
         st.write(f"**Ubicación:** {ERROR_REPOSITORY_PATH}/")
+        st.write(f"**Usuario actual:** {usuario_actual}")
         st.write(f"**Hojas cargadas:** {len(error_sheets)}")
         
         for sheet_name, df in error_sheets.items():
             corrected = (df["Estado"] == "Corregido").sum() if "Estado" in df.columns else 0
+            false_positive = (df["Estado"] == "Falso positivo").sum() if "Estado" in df.columns else 0
             total = len(df)
-            st.write(f"  - **{sheet_name}:** {total} registros ({corrected} corregidos)")
+            st.write(f"  - **{sheet_name}:** {total} registros ({corrected} corregidos, {false_positive} falso positivo)")
 
