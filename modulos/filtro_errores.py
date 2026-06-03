@@ -104,7 +104,7 @@ def load_entregas_data():
 
 def find_coordinate_columns(df):
     """
-    Busca automáticamente las columnas de sector, manzana y lote.
+    Busca automáticamente las columnas de sector, manzana y lote en un DataFrame específico.
     Retorna un diccionario con los nombres de columnas encontrados.
     """
     cols_found = {}
@@ -131,33 +131,40 @@ def find_coordinate_columns(df):
     return cols_found
 
 
-def filter_data(df, sector=None, manzana=None, lote=None, coords_cols=None):
+def filter_data(df, sector=None, manzana=None, lote=None):
     """Filtra un dataframe por sector, manzana y lote"""
     filtered = df.copy()
     
-    if coords_cols is None:
-        coords_cols = find_coordinate_columns(df)
+    # Detectar columnas EN ESTE DATAFRAME ESPECÍFICO
+    coords_cols = find_coordinate_columns(df)
+    
+    if not coords_cols:
+        # Si no hay coordenadas, devolver todo
+        return filtered
     
     if sector is not None and sector != "" and "sector" in coords_cols:
         sector_col = coords_cols["sector"]
-        sector_str = str(sector).zfill(2)
-        filtered = filtered[
-            filtered[sector_col].astype(str).str.zfill(2) == sector_str
-        ]
+        if sector_col in filtered.columns:
+            sector_str = str(sector).zfill(2)
+            filtered = filtered[
+                filtered[sector_col].astype(str).str.zfill(2) == sector_str
+            ]
     
     if manzana is not None and manzana != "" and "manzana" in coords_cols:
         manzana_col = coords_cols["manzana"]
-        manzana_str = str(manzana).zfill(3)
-        filtered = filtered[
-            filtered[manzana_col].astype(str).str.zfill(3) == manzana_str
-        ]
+        if manzana_col in filtered.columns:
+            manzana_str = str(manzana).zfill(3)
+            filtered = filtered[
+                filtered[manzana_col].astype(str).str.zfill(3) == manzana_str
+            ]
     
     if lote is not None and lote != "" and "lote" in coords_cols:
         lote_col = coords_cols["lote"]
-        lote_str = str(lote).zfill(3)
-        filtered = filtered[
-            filtered[lote_col].astype(str).str.zfill(3) == lote_str
-        ]
+        if lote_col in filtered.columns:
+            lote_str = str(lote).zfill(3)
+            filtered = filtered[
+                filtered[lote_col].astype(str).str.zfill(3) == lote_str
+            ]
     
     return filtered
 
@@ -378,7 +385,7 @@ def render():
         # Filtrar datos de cada tipo de error según los criterios
         filtered_errors = {}
         for error_name, df_error in error_sheets.items():
-            df_filtered = filter_data(df_error, sector, manzana, lote, coords_cols)
+            df_filtered = filter_data(df_error, sector, manzana, lote)
             if not df_filtered.empty:
                 filtered_errors[error_name] = df_filtered
         
@@ -514,7 +521,7 @@ def render():
         df_consolidated = pd.concat(error_sheets.values(), ignore_index=True)
         coords_cols = find_coordinate_columns(df_consolidated)
         
+        st.write(f"\n**Hojas/Errores cargadas:**")
         for error_name, df_error in error_sheets.items():
-            st.write(f"\n**{error_name}:** {len(df_error)} predios")
-            if coords_cols:
-                st.write(f"  - Coordenadas detectadas: {coords_cols}")
+            sheet_coords = find_coordinate_columns(df_error)
+            st.write(f"  - **{error_name}:** {len(df_error)} predios (Coords: {sheet_coords})")
