@@ -128,6 +128,21 @@ def convert_coordinate_columns_to_string(df):
     return df
 
 
+def sanitize_tab_label(name: str) -> str:
+    """
+    Sanitiza el nombre de un tab removiendo caracteres potencialmente problemáticos
+    y limitando la longitud. Devuelve una cadena segura para usar en etiquetas.
+    """
+    if not isinstance(name, str):
+        name = str(name)
+    # Permitir letras, números, espacios y algunos signos básicos
+    safe = ''.join(c for c in name if c.isalnum() or c in (' ', '_', '-', '(', ')'))
+    safe = safe.strip()
+    if not safe:
+        return "tab"
+    return safe[:50]
+
+
 def load_entregas_data():
     """Carga datos de Entregas_a_cofopri.xlsx"""
     file_path = os.path.join(RENTAS_PATH, "Entregas_a_cofopri.xlsx")
@@ -256,7 +271,7 @@ def render():
     if municipio != st.session_state.current_municipio:
         st.session_state.current_municipio = municipio
         st.session_state.error_sheets_cache = load_all_error_sheets(municipio)
-        st.rerun()
+        st.experimental_rerun()
     
     error_sheets = st.session_state.error_sheets_cache
     
@@ -396,12 +411,12 @@ def render():
                 "Cantidad de Predios": [len(df) for df in filtered_errors.values()]
             }
             resumen_df = pd.DataFrame(resumen_data)
-            st.dataframe(resumen_df, use_container_width=True, hide_index=True)
+            st.dataframe(resumen_df.astype(str), height=400, use_container_width=True, hide_index=True)
             
             st.markdown("---")
             
             # Crear tabs dinámicamente para cada tipo de error encontrado
-            tabs = st.tabs([f"🔴 {error_name} ({len(filtered_errors[error_name])})" for error_name in filtered_errors.keys()])
+            tabs = st.tabs([f"🔴 {sanitize_tab_label(error_name)} ({len(filtered_errors[error_name])})" for error_name in filtered_errors.keys()])
             
             # Dataframe consolidado para descargar
             all_filtered_data = {}
@@ -411,8 +426,8 @@ def render():
                     st.markdown(f"### {error_name}")
                     st.write(f"**Predios con {error_name}:** {len(df_filtered)}")
                     
-                    # Mostrar tabla
-                    st.dataframe(df_filtered, use_container_width=True)
+                    # Mostrar tabla (convertimos a string para evitar overflow en la visualización)
+                    st.dataframe(df_filtered.astype(str), height=400, use_container_width=True)
                     
                     # Guardar para descargar consolidado
                     all_filtered_data[error_name] = df_filtered
@@ -543,7 +558,7 @@ def render():
                     "Cantidad de Predios": [len(df) for df in consolidated_errors.values()]
                 }
                 resumen_df = pd.DataFrame(resumen_data)
-                st.dataframe(resumen_df, use_container_width=True, hide_index=True)
+                st.dataframe(resumen_df.astype(str), height=400, use_container_width=True, hide_index=True)
                 
                 st.markdown("---")
                 
@@ -575,3 +590,4 @@ def render():
         for error_name, df_error in error_sheets.items():
             sheet_coords = find_coordinate_columns(df_error)
             st.write(f"  - **{error_name}:** {len(df_error)} predios (Coords: {sheet_coords})")
+
