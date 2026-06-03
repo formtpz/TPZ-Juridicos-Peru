@@ -1,5 +1,5 @@
 # modulos/filtro_errores.py
-# Versión: 3.2 - Repositorio de errores con estado editable y validación mejorada
+# Versión: 3.3 - Repositorio de errores con mejor manejo de errores y debug
 import streamlit as st
 import pandas as pd
 import os
@@ -59,6 +59,7 @@ def load_error_file(filename):
     """
     Carga un archivo Excel desde Repositorio_de_Errores
     Retorna un diccionario {nombre_hoja: dataframe}
+    Con mejor manejo de errores y debug
     """
     file_path = os.path.join(ERROR_REPOSITORY_PATH, filename)
     
@@ -70,33 +71,67 @@ def load_error_file(filename):
         if filename.endswith('.xlsb'):
             from pyxlsb import open_workbook
             sheets = {}
-            with open_workbook(file_path) as wb:
-                for sheet in wb.sheets:
-                    try:
-                        df = pd.read_excel(file_path, sheet_name=sheet.name, engine="pyxlsb")
-                        if not df.empty:
-                            df = ensure_status_columns(df)
-                            df = convert_data_types_safely(df)
-                            sheets[sheet.name] = df
-                    except Exception:
-                        continue
+            try:
+                with open_workbook(file_path) as wb:
+                    sheet_count = len(wb.sheets)
+                    if sheet_count == 0:
+                        st.warning(f"⚠️ El archivo {filename} no contiene hojas")
+                        return {}
+                    
+                    for sheet in wb.sheets:
+                        try:
+                            df = pd.read_excel(file_path, sheet_name=sheet.name, engine="pyxlsb")
+                            if not df.empty:
+                                df = ensure_status_columns(df)
+                                df = convert_data_types_safely(df)
+                                sheets[sheet.name] = df
+                            else:
+                                st.warning(f"⚠️ La hoja '{sheet.name}' está vacía")
+                        except Exception as e:
+                            st.warning(f"⚠️ Error al leer hoja '{sheet.name}': {str(e)}")
+                            continue
+            except Exception as e:
+                st.error(f"❌ Error al abrir archivo .xlsb {filename}: {str(e)}")
+                return {}
             return sheets
         else:
             # Archivo .xlsx
-            xls = pd.ExcelFile(file_path, engine="openpyxl")
-            sheets = {}
-            for sheet_name in xls.sheet_names:
-                try:
-                    df = pd.read_excel(file_path, sheet_name=sheet_name, engine="openpyxl")
-                    if not df.empty:
+            try:
+                xls = pd.ExcelFile(file_path, engine="openpyxl")
+                sheet_names = xls.sheet_names
+                
+                if not sheet_names:
+                    st.warning(f"⚠️ El archivo {filename} no contiene hojas")
+                    return {}
+                
+                sheets = {}
+                for sheet_name in sheet_names:
+                    try:
+                        df = pd.read_excel(file_path, sheet_name=sheet_name, engine="openpyxl")
+                        
+                        if df.empty:
+                            st.warning(f"⚠️ La hoja '{sheet_name}' está vacía en {filename}")
+                            continue
+                        
+                        # Si solo tiene columnas sin datos
+                        if len(df) == 0:
+                            st.warning(f"⚠️ La hoja '{sheet_name}' solo contiene encabezados")
+                            continue
+                        
                         df = ensure_status_columns(df)
                         df = convert_data_types_safely(df)
                         sheets[sheet_name] = df
-                except Exception:
-                    continue
-            return sheets
+                        
+                    except Exception as e:
+                        st.warning(f"⚠️ Error al leer hoja '{sheet_name}' en {filename}: {str(e)}")
+                        continue
+                
+                return sheets
+            except Exception as e:
+                st.error(f"❌ Error al abrir archivo .xlsx {filename}: {str(e)}")
+                return {}
     except Exception as e:
-        st.error(f"❌ Error al cargar {filename}: {e}")
+        st.error(f"❌ Error general al cargar {filename}: {str(e)}")
         return {}
 
 
@@ -428,7 +463,8 @@ def render():
     # Cargar datos si el archivo cambió
     if error_file != st.session_state.current_error_file:
         st.session_state.current_error_file = error_file
-        st.session_state.error_sheets_cache = load_error_file(error_file)
+        with st.spinner(f"📂 Cargando {error_file}..."):
+            st.session_state.error_sheets_cache = load_error_file(error_file)
         st.session_state.file_modified = False
         
         try:
@@ -443,6 +479,11 @@ def render():
     
     if not error_sheets:
         st.error(f"❌ No se encontraron datos en {error_file}")
+        st.info("💡 Posibles causas:")
+        st.write("  - El archivo está vacío")
+        st.write("  - Las hojas no contienen datos")
+        st.write("  - El archivo está corrupto")
+        st.write("  - El formato no es compatible")
         return
     
     # ============================================================
@@ -735,3 +776,4 @@ def render():
             false_positive = (df["Estado"] == "Falso positivo").sum() if "Estado" in df.columns else 0
             total = len(df)
             st.write(f"  - **{sheet_name}:** {total} registros ({corrected} corregidos, {false_positive} falso positivo)")
+
