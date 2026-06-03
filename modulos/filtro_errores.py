@@ -24,7 +24,10 @@ RENTAS_PATH = "Rentas_resumidos"
 # ============================================================
 
 def get_available_municipalities():
-    """Obtiene municipios disponibles en la carpeta Rentas_resumidos"""
+    """
+    Obtiene municipios disponibles en la carpeta Rentas_resumidos.
+    Busca archivos con nombres VES, SJM, CH en formatos .xlsx o .xlsb
+    """
     if not os.path.exists(RENTAS_PATH):
         return []
     
@@ -36,6 +39,7 @@ def get_available_municipalities():
         
         if os.path.exists(file_xlsx) or os.path.exists(file_xlsb):
             available.append(mun_code)
+    
     return available
 
 
@@ -51,6 +55,8 @@ def load_all_error_sheets(mun_code):
     
     # Determinar qué archivo existe
     file_path = None
+    engine = None
+    
     if os.path.exists(file_xlsx):
         file_path = file_xlsx
         engine = "openpyxl"
@@ -70,6 +76,8 @@ def load_all_error_sheets(mun_code):
                     try:
                         df = pd.read_excel(file_path, sheet_name=sheet.name, engine="pyxlsb")
                         if not df.empty:
+                            # Convertir a tipos de datos apropiados para evitar floats
+                            df = convert_coordinate_columns_to_string(df)
                             sheets[sheet.name] = df
                     except Exception as e:
                         continue
@@ -82,6 +90,8 @@ def load_all_error_sheets(mun_code):
                 try:
                     df = pd.read_excel(file_path, sheet_name=sheet_name, engine="openpyxl")
                     if not df.empty:
+                        # Convertir a tipos de datos apropiados para evitar floats
+                        df = convert_coordinate_columns_to_string(df)
                         sheets[sheet_name] = df
                 except Exception as e:
                     continue
@@ -91,11 +101,40 @@ def load_all_error_sheets(mun_code):
         return {}
 
 
+def convert_coordinate_columns_to_string(df):
+    """
+    Convierte las columnas de coordenadas (sector, manzana, lote) a string
+    para evitar que se conviertan a float
+    """
+    df = df.copy()
+    col_lower = [c.lower() for c in df.columns]
+    
+    for col, col_l in zip(df.columns, col_lower):
+        if "sector" in col_l or "sect" in col_l or "manzana" in col_l or "manz" in col_l or "lote" in col_l:
+            # Convertir a string y rellenar con ceros
+            df[col] = df[col].astype(str).str.strip()
+            # Si contiene decimal, remover la parte decimal
+            if any(df[col].str.contains(r'\.', na=False)):
+                df[col] = df[col].str.replace(r'\.0$', '', regex=True)
+            # Rellenar con ceros
+            if "lote" in col_l:
+                df[col] = df[col].apply(lambda x: x.zfill(3) if pd.notna(x) and x != '' else x)
+            elif "manzana" in col_l or "manz" in col_l:
+                df[col] = df[col].apply(lambda x: x.zfill(3) if pd.notna(x) and x != '' else x)
+            elif "sector" in col_l or "sect" in col_l:
+                df[col] = df[col].apply(lambda x: x.zfill(2) if pd.notna(x) and x != '' else x)
+    
+    return df
+
+
 def load_entregas_data():
     """Carga datos de Entregas_a_cofopri.xlsx"""
     file_path = os.path.join(RENTAS_PATH, "Entregas_a_cofopri.xlsx")
     try:
         df = pd.read_excel(file_path, engine="openpyxl")
+        # Convertir concat_sec a string
+        if "concat_sec" in df.columns:
+            df["concat_sec"] = df["concat_sec"].astype(str).str.strip()
         return df
     except Exception as e:
         st.error(f"Error al cargar Entregas_a_cofopri.xlsx: {e}")
@@ -146,63 +185,19 @@ def filter_data(df, sector=None, manzana=None, lote=None):
         sector_col = coords_cols["sector"]
         if sector_col in filtered.columns:
             sector_str = str(sector).zfill(2)
-            filtered = filtered[
-                filtered[sector_col].astype(str).str.zfill(2) == sector_str
-            ]
+            filtered = filtered[filtered[sector_col].astype(str).str.zfill(2) == sector_str]
     
     if manzana is not None and manzana != "" and "manzana" in coords_cols:
         manzana_col = coords_cols["manzana"]
         if manzana_col in filtered.columns:
             manzana_str = str(manzana).zfill(3)
-            filtered = filtered[
-                filtered[manzana_col].astype(str).str.zfill(3) == manzana_str
-            ]
+            filtered = filtered[filtered[manzana_col].astype(str).str.zfill(3) == manzana_str]
     
     if lote is not None and lote != "" and "lote" in coords_cols:
         lote_col = coords_cols["lote"]
         if lote_col in filtered.columns:
             lote_str = str(lote).zfill(3)
-            filtered = filtered[
-                filtered[lote_col].astype(str).str.zfill(3) == lote_str
-            ]
-    
-    return filtered
-
-
-def filter_by_polygon(entregas_df, polygon_code):
-    """
-    Filtra datos por código de polígono (ej: "VES-02").
-    Busca las columnas cod_sector y cod_mzna automáticamente.
-    """
-    if entregas_df is None or entregas_df.empty:
-        return pd.DataFrame()
-    
-    filtered = entregas_df.copy()
-    coords_cols = find_coordinate_columns(filtered)
-    
-    try:
-        mun_code, polygon_part = polygon_code.split("-")
-    except:
-        return pd.DataFrame()
-    
-    # Buscar columnas de sector y manzana
-    sector_col = None
-    manzana_col = None
-    
-    for col in filtered.columns:
-        if "cod_sector" in col.lower() or "sector" in col.lower():
-            sector_col = col
-        if "cod_mzna" in col.lower() or "manzana" in col.lower():
-            manzana_col = col
-    
-    if sector_col and manzana_col:
-        sector_str = mun_code.zfill(2)
-        manzana_str = polygon_part.zfill(3)
-        
-        filtered = filtered[
-            (filtered[sector_col].astype(str).str.zfill(2) == sector_str) &
-            (filtered[manzana_col].astype(str).str.zfill(3) == manzana_str)
-        ]
+            filtered = filtered[filtered[lote_col].astype(str).str.zfill(3) == lote_str]
     
     return filtered
 
@@ -239,8 +234,6 @@ def render():
         st.session_state.current_municipio = None
     if "error_sheets_cache" not in st.session_state:
         st.session_state.error_sheets_cache = {}
-    if "filtro_tipo_session" not in st.session_state:
-        st.session_state.filtro_tipo_session = "sector_manzana"
     
     # ============================================================
     # SELECTOR DE MUNICIPIO
@@ -249,17 +242,14 @@ def render():
     
     if not available_mun:
         st.error("❌ No hay archivos de municipios disponibles en Rentas_resumidos/")
-        st.info("📌 Se esperan archivos: VES.xlsx, SJM.xlsx, CH.xlsx o VES.xlsb, SJM.xlsb, CH.xlsb")
+        st.info("📌 Se esperan archivos: VES.xlsb/xlsx, SJM.xlsx, CH.xlsx")
         return
     
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        municipio = st.selectbox(
-            "🏘️ Selecciona un Municipio",
-            options=available_mun,
-            format_func=lambda x: MUNICIPIOS.get(x, x)
-        )
+    municipio = st.selectbox(
+        "🏘️ Selecciona un Municipio",
+        options=available_mun,
+        format_func=lambda x: MUNICIPIOS.get(x, x)
+    )
     
     # Cargar datos si el municipio cambió
     if municipio != st.session_state.current_municipio:
@@ -275,18 +265,7 @@ def render():
         return
     
     total_registros = sum(len(df) for df in error_sheets.values())
-    st.info(f"✅ Cargadas {len(error_sheets)} tipo(s) de error con {total_registros} registros en total")
-    
-    # ============================================================
-    # MOSTRAR TABLA RESUMEN DE ERRORES
-    # ============================================================
-    st.subheader("📊 Resumen de Errores por Tipo")
-    resumen_data = {
-        "Tipo de Error": list(error_sheets.keys()),
-        "Cantidad de Predios": [len(df) for df in error_sheets.values()]
-    }
-    resumen_df = pd.DataFrame(resumen_data)
-    st.dataframe(resumen_df, use_container_width=True, hide_index=True)
+    st.success(f"✅ Cargadas {len(error_sheets)} tipo(s) de error con {total_registros} registros en total")
     
     # ============================================================
     # SELECTOR DE TIPO DE FILTRADO
@@ -329,11 +308,11 @@ def render():
             # Selector de Sector
             sector_col = coords_cols.get("sector")
             if sector_col:
-                sectors = sorted(df_consolidated[sector_col].dropna().unique())
+                sectors = sorted([x for x in df_consolidated[sector_col].dropna().unique() if str(x).strip()])
                 sector = st.selectbox(
-                    f"Sector ({sector_col})",
+                    f"Sector",
                     options=[None] + list(sectors),
-                    format_func=lambda x: f"Sector {str(x).zfill(2)}" if x is not None else "Todos"
+                    format_func=lambda x: f"Sector {x}" if x is not None else "Todos"
                 )
             else:
                 sector = None
@@ -342,17 +321,17 @@ def render():
         # Filtrar manzanas según sector
         temp_df = df_consolidated.copy()
         if sector is not None and sector_col:
-            temp_df = temp_df[temp_df[sector_col] == sector]
+            temp_df = temp_df[temp_df[sector_col].astype(str) == str(sector)]
         
         with col2:
             # Selector de Manzana
             manzana_col = coords_cols.get("manzana")
             if manzana_col:
-                manzanas = sorted(temp_df[manzana_col].dropna().unique())
+                manzanas = sorted([x for x in temp_df[manzana_col].dropna().unique() if str(x).strip()])
                 manzana = st.selectbox(
-                    f"Manzana ({manzana_col})",
+                    f"Manzana",
                     options=[None] + list(manzanas),
-                    format_func=lambda x: f"Manzana {str(x).zfill(3)}" if x is not None else "Todas"
+                    format_func=lambda x: f"Manzana {x}" if x is not None else "Todas"
                 )
             else:
                 manzana = None
@@ -361,19 +340,19 @@ def render():
         # Filtrar lotes según sector y manzana
         temp_df2 = df_consolidated.copy()
         if sector is not None and sector_col:
-            temp_df2 = temp_df2[temp_df2[sector_col] == sector]
+            temp_df2 = temp_df2[temp_df2[sector_col].astype(str) == str(sector)]
         if manzana is not None and manzana_col:
-            temp_df2 = temp_df2[temp_df2[manzana_col] == manzana]
+            temp_df2 = temp_df2[temp_df2[manzana_col].astype(str) == str(manzana)]
         
         with col3:
             # Selector de Lote
             lote_col = coords_cols.get("lote")
             if lote_col:
-                lotes = sorted(temp_df2[lote_col].dropna().unique())
+                lotes = sorted([x for x in temp_df2[lote_col].dropna().unique() if str(x).strip()])
                 lote = st.selectbox(
-                    f"Lote ({lote_col})",
+                    f"Lote",
                     options=[None] + list(lotes),
-                    format_func=lambda x: f"Lote {str(x).zfill(3)}" if x is not None else "Todos"
+                    format_func=lambda x: f"Lote {x}" if x is not None else "Todos"
                 )
             else:
                 lote = None
@@ -398,14 +377,27 @@ def render():
             # Mostrar info de ubicación
             location_info = []
             if sector is not None:
-                location_info.append(f"Sector {str(sector).zfill(2)}")
+                location_info.append(f"Sector {sector}")
             if manzana is not None:
-                location_info.append(f"Manzana {str(manzana).zfill(3)}")
+                location_info.append(f"Manzana {manzana}")
             if lote is not None:
-                location_info.append(f"Lote {str(lote).zfill(3)}")
+                location_info.append(f"Lote {lote}")
             
             location_text = " - ".join(location_info) if location_info else "General"
             st.info(f"📍 Ubicación: {location_text}")
+            
+            # ============================================================
+            # MOSTRAR RESUMEN DE ERRORES FILTRADOS
+            # ============================================================
+            st.subheader("📊 Resumen de Errores (Filtrado)")
+            resumen_data = {
+                "Tipo de Error": list(filtered_errors.keys()),
+                "Cantidad de Predios": [len(df) for df in filtered_errors.values()]
+            }
+            resumen_df = pd.DataFrame(resumen_data)
+            st.dataframe(resumen_df, use_container_width=True, hide_index=True)
+            
+            st.markdown("---")
             
             # Crear tabs dinámicamente para cada tipo de error encontrado
             tabs = st.tabs([f"🔴 {error_name} ({len(filtered_errors[error_name])})" for error_name in filtered_errors.keys()])
@@ -452,6 +444,14 @@ def render():
     # ============================================================
     elif filtro_tipo == "poligono":
         st.subheader("🗺️ Filtro por Polígono")
+        st.markdown("""
+        **Flujo de filtrado:**
+        1. Selecciona un polígono
+        2. Se consulta Entregas_a_cofopri para obtener los concat_sec del polígono
+        3. Se extrae concatenación sector+manzana de cada error
+        4. Se comparan y se extraen solo los registros coincidentes
+        5. Se descarga un archivo consolidado con todos los errores del polígono
+        """)
         
         # Cargar datos de entregas
         df_entregas = load_entregas_data()
@@ -467,44 +467,96 @@ def render():
                 polygon_col = col
                 break
         
-        if polygon_col:
-            poligonos = sorted(df_entregas[polygon_col].dropna().unique())
-            # Filtrar por municipio actual si es posible
-            poligonos = [p for p in poligonos if str(p).startswith(municipio)]
-        else:
+        if not polygon_col:
             st.error("❌ La columna 'poligono' no existe en Entregas_a_cofopri.xlsx")
             return
         
-        if not poligonos:
+        poligonos = sorted([x for x in df_entregas[polygon_col].dropna().unique() if str(x).strip()])
+        
+        # Filtrar por municipio actual si es posible
+        poligonos_municipio = [p for p in poligonos if str(p).startswith(municipio)]
+        
+        if not poligonos_municipio:
             st.warning(f"⚠️ No hay polígonos para {municipio} en Entregas_a_cofopri.xlsx")
             return
         
         poligono_seleccionado = st.selectbox(
             "Selecciona un polígono",
-            options=poligonos,
+            options=poligonos_municipio,
             format_func=lambda x: f"Polígono: {x}"
         )
         
         if st.button("✅ Aplicar Filtro de Polígono", type="primary", use_container_width=True):
-            # Filtrar entregas por polígono
-            entregas_filtradas = df_entregas[df_entregas[polygon_col] == poligono_seleccionado]
+            # PASO 1 y 2: Filtrar Entregas_a_cofopri por polígono seleccionado
+            entregas_poligono = df_entregas[df_entregas[polygon_col] == poligono_seleccionado]
             
-            if entregas_filtradas.empty:
+            if entregas_poligono.empty:
                 st.warning("⚠️ No hay registros de entregas para este polígono")
+                return
+            
+            st.success(f"✅ Se encontraron {len(entregas_poligono)} registro(s) en Entregas_a_cofopri")
+            
+            # PASO 3: Obtener los concat_sec del polígono
+            concat_secs = set(entregas_poligono["concat_sec"].dropna().unique())
+            
+            st.info(f"📊 Consultando {len(concat_secs)} combinaciones sector+manzana...")
+            
+            # PASO 4, 5 y 6: Comparar con errores municipales
+            consolidated_errors = {}
+            
+            for error_name, df_error in error_sheets.items():
+                # Detectar columnas sector y manzana
+                coords_cols = find_coordinate_columns(df_error)
+                
+                if "sector" in coords_cols and "manzana" in coords_cols:
+                    sector_col = coords_cols["sector"]
+                    manzana_col = coords_cols["manzana"]
+                    
+                    # Construir concatenación sector+manzana
+                    df_error_copy = df_error.copy()
+                    df_error_copy["crc_concat"] = (
+                        df_error_copy[sector_col].astype(str).str.strip() +
+                        df_error_copy[manzana_col].astype(str).str.strip()
+                    )
+                    
+                    # Filtrar solo los registros que coinciden
+                    df_filtered = df_error_copy[df_error_copy["crc_concat"].isin(concat_secs)]
+                    
+                    if not df_filtered.empty:
+                        # Remover la columna de concatenación antes de guardar
+                        df_filtered = df_filtered.drop(columns=["crc_concat"])
+                        consolidated_errors[error_name] = df_filtered
+            
+            if not consolidated_errors:
+                st.warning("⚠️ No se encontraron errores para este polígono")
             else:
-                st.success(f"✅ Se encontraron {len(entregas_filtradas)} registro(s) de entrega")
+                total_errors = sum(len(df) for df in consolidated_errors.values())
+                st.success(f"✅ Se encontraron {total_errors} predio(s) con error(es) en este polígono")
                 
-                with st.expander("📊 Ver datos de Entregas a COFOPRI", expanded=True):
-                    st.dataframe(entregas_filtradas, use_container_width=True)
+                # ============================================================
+                # MOSTRAR RESUMEN CONSOLIDADO
+                # ============================================================
+                st.subheader("📊 Resumen de Errores por Tipo")
+                resumen_data = {
+                    "Tipo de Error": list(consolidated_errors.keys()),
+                    "Cantidad de Predios": [len(df) for df in consolidated_errors.values()]
+                }
+                resumen_df = pd.DataFrame(resumen_data)
+                st.dataframe(resumen_df, use_container_width=True, hide_index=True)
                 
-                # Descargar entregas filtradas
-                excel_entregas = export_to_excel(
-                    {"Entregas": entregas_filtradas}
-                )
+                st.markdown("---")
+                
+                # ============================================================
+                # DESCARGAR CONSOLIDADO (SIN VISTAS INDIVIDUALES)
+                # ============================================================
+                st.subheader("📥 Descargar Errores del Polígono")
+                st.markdown(f"Todos los errores asociados a **{poligono_seleccionado}** compilados en un único archivo")
+                
+                excel_consolidated = export_to_excel(consolidated_errors)
                 st.download_button(
-                    label="⬇️ Descargar Entregas de este Polígono",
-                    data=excel_entregas,
-                    file_name=f"Entregas_{poligono_seleccionado}.xlsx",
+                    label=f"⬇️ Descargar Todos los Errores del Polígono {poligono_seleccionado}",
+                    data=excel_consolidated,
+                    file_name=f"Poligono_{poligono_seleccionado}_Errores_Consolidados.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True
                 )
@@ -517,9 +569,6 @@ def render():
         st.write(f"**Municipio:** {MUNICIPIOS.get(municipio, municipio)}")
         st.write(f"**Total de tipos de error:** {len(error_sheets)}")
         st.write(f"**Total de predios con errores:** {total_registros}")
-        
-        df_consolidated = pd.concat(error_sheets.values(), ignore_index=True)
-        coords_cols = find_coordinate_columns(df_consolidated)
         
         st.write(f"\n**Hojas/Errores cargadas:**")
         for error_name, df_error in error_sheets.items():
