@@ -271,7 +271,21 @@ def render():
     if municipio != st.session_state.current_municipio:
         st.session_state.current_municipio = municipio
         st.session_state.error_sheets_cache = load_all_error_sheets(municipio)
-        st.experimental_rerun()
+        # Intentar rerun de forma segura: algunos entornos/versions de Streamlit
+        # no exponen `experimental_rerun`. Usar `rerun` si existe o como
+        # fallback detener la ejecución con `st.stop()`.
+        try:
+            if hasattr(st, "experimental_rerun") and callable(st.experimental_rerun):
+                st.experimental_rerun()
+            elif hasattr(st, "rerun") and callable(st.rerun):
+                st.rerun()
+            else:
+                st.stop()
+        except Exception:
+            try:
+                st.stop()
+            except Exception:
+                pass
     
     error_sheets = st.session_state.error_sheets_cache
     
@@ -590,4 +604,5 @@ def render():
         for error_name, df_error in error_sheets.items():
             sheet_coords = find_coordinate_columns(df_error)
             st.write(f"  - **{error_name}:** {len(df_error)} predios (Coords: {sheet_coords})")
+
 
