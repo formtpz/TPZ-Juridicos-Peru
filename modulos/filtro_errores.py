@@ -374,30 +374,49 @@ def generate_error_statistics(error_sheets):
 def display_editable_dataframe(df, key_prefix):
     """
     Muestra un DataFrame editable con columnas de Estado como dropdown
+    Coerciones de tipo para evitar StreamlitAPIException por incompatibilidad.
     """
     df_display = df.copy().reset_index(drop=True)
-    
+
+    # Coerciones seguras: Streamlit data_editor espera tipos compatibles con ColumnConfig
+    if "Estado" in df_display.columns:
+        # Rellenar nulos antes de convertir a str
+        df_display["Estado"] = df_display["Estado"].fillna("No corregido").astype(str)
+        # Evitar literal 'nan' o 'None'
+        df_display["Estado"] = df_display["Estado"].replace({"nan": "No corregido", "None": "No corregido"})
+        # Asegurar que los valores están dentro de ESTADOS_VALIDOS
+        df_display["Estado"] = df_display["Estado"].apply(lambda x: x if x in ESTADOS_VALIDOS else "No corregido")
+
+    if "Usuario_Corrigió" in df_display.columns:
+        df_display["Usuario_Corrigió"] = df_display["Usuario_Corrigió"].fillna("").astype(str)
+        df_display["Usuario_Corrigió"] = df_display["Usuario_Corrigió"].replace({"nan": "", "None": ""})
+
+    if "Fecha_Corrección" in df_display.columns:
+        df_display["Fecha_Corrección"] = df_display["Fecha_Corrección"].fillna("").astype(str)
+        df_display["Fecha_Corrección"] = df_display["Fecha_Corrección"].replace({"nan": "", "None": ""})
+
     column_config = {}
-    
+
     if "Estado" in df_display.columns:
         column_config["Estado"] = st.column_config.SelectboxColumn(
             "Estado",
             options=ESTADOS_VALIDOS,
             required=True
         )
-    
+
     if "Usuario_Corrigió" in df_display.columns:
         column_config["Usuario_Corrigió"] = st.column_config.TextColumn(
             "Usuario_Corrigió",
             width="medium"
         )
-    
+
     if "Fecha_Corrección" in df_display.columns:
         column_config["Fecha_Corrección"] = st.column_config.TextColumn(
             "Fecha_Corrección",
             width="medium"
         )
-    
+
+    # Mostrar el editor
     edited_df = st.data_editor(
         df_display,
         use_container_width=True,
@@ -406,7 +425,7 @@ def display_editable_dataframe(df, key_prefix):
         key=key_prefix,
         disabled=[]
     )
-    
+
     return edited_df
 
 
@@ -721,6 +740,25 @@ def render():
                         use_container_width=True,
                         key=f"download_{error_name}"
                     )
+            
+            # Crear un archivo consolidado con todos los errores filtrados (una sola hoja)
+            try:
+                consolidated_filtered_df = pd.concat([df.reset_index(drop=True) for df in filtered_errors.values()], ignore_index=True)
+            except ValueError:
+                consolidated_filtered_df = pd.DataFrame()
+
+            if not consolidated_filtered_df.empty:
+                st.markdown("---")
+                st.subheader("⬇️ Descargar todo lo filtrado (Un solo archivo)")
+                excel_filtrados = export_to_excel({"Filtrados": consolidated_filtered_df})
+                st.download_button(
+                    label=f"⬇️ Descargar Excel consolidado (Filtrados)",
+                    data=excel_filtrados,
+                    file_name=f"{error_file[:-5]}_filtrados_{str(sector) if sector else 'todos'}_{str(manzana) if manzana else 'todos'}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                    key="download_consolidado_filtrados"
+                )
             
             if st.session_state.file_modified:
                 st.markdown("---")
