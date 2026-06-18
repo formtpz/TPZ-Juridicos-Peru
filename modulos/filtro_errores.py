@@ -741,24 +741,32 @@ def render():
                         key=f"download_{error_name}"
                     )
             
-            # Crear un archivo consolidado con todos los errores filtrados (una sola hoja)
-            try:
-                consolidated_filtered_df = pd.concat([df.reset_index(drop=True) for df in filtered_errors.values()], ignore_index=True)
-            except ValueError:
-                consolidated_filtered_df = pd.DataFrame()
-
-            if not consolidated_filtered_df.empty:
-                st.markdown("---")
-                st.subheader("⬇️ Descargar todo lo filtrado (Un solo archivo)")
-                excel_filtrados = export_to_excel({"Filtrados": consolidated_filtered_df})
-                st.download_button(
-                    label=f"⬇️ Descargar Excel consolidado (Filtrados)",
-                    data=excel_filtrados,
-                    file_name=f"{error_file[:-5]}_filtrados_{str(sector) if sector else 'todos'}_{str(manzana) if manzana else 'todos'}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True,
-                    key="download_consolidado_filtrados"
-                )
+            # Crear un archivo con los errores filtrados: UNA HOJA POR TIPO DE ERROR (cada hoja es el error original)
+            if filtered_errors:
+                # Preparar los nombres de hoja sanos y únicos
+                sheets_for_export = {}
+                seen = {}
+                for name, df in filtered_errors.items():
+                    safe = sanitize_tab_label(name)[:31]  # máximo 31 chars para Excel
+                    if safe in seen:
+                        seen[safe] += 1
+                        safe = f"{safe}_{seen[safe]}"
+                    else:
+                        seen[safe] = 0
+                    sheets_for_export[safe] = df.reset_index(drop=True)
+                
+                if sheets_for_export:
+                    st.markdown("---")
+                    st.subheader("⬇️ Descargar todo lo filtrado (Cada error en su propia hoja)")
+                    excel_filtrados = export_to_excel(sheets_for_export)
+                    st.download_button(
+                        label=f"⬇️ Descargar Excel por hojas (Filtrados por ubicación)",
+                        data=excel_filtrados,
+                        file_name=f"{error_file[:-5]}_filtrados_{str(sector) if sector else 'todos'}_{str(manzana) if manzana else 'todos'}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True,
+                        key="download_consolidado_filtrados"
+                    )
             
             if st.session_state.file_modified:
                 st.markdown("---")
