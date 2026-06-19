@@ -1,5 +1,5 @@
 # modulos/filtro_errores.py
-# Versión: 3.4 - Repositorio de errores con debug mejorado
+# Versión: 3.5 - Repositorio de errores con manejo mejorado de usuarios múltiples
 import streamlit as st
 import pandas as pd
 import os
@@ -8,6 +8,8 @@ from permisos import validar_acceso
 import warnings
 from datetime import datetime
 import traceback
+import time
+import threading
 warnings.filterwarnings('ignore')
 
 # ============================================================
@@ -24,6 +26,9 @@ RENTAS_PATH = "Rentas_resumidos"
 
 ESTADOS_VALIDOS = ["No corregido", "Corregido", "Falso positivo"]
 
+# Lock para evitar condiciones de carrera con archivos
+_file_lock = threading.Lock()
+LOCK_TIMEOUT = 30  # segundos
 
 # ============================================================
 # FUNCIONES AUXILIARES
@@ -222,24 +227,37 @@ def save_error_file(filename, sheets_dict):
     """
     Guarda los DataFrames actualizados en el archivo Excel
     Crea backup automático del archivo original
+    Implementa lock para evitar condiciones de carrera
     """
     file_path = os.path.join(ERROR_REPOSITORY_PATH, filename)
     
     try:
-        # Crear backup
-        if os.path.exists(file_path):
-            backup_name = f"{filename[:-5]}_backup_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-            backup_path = os.path.join(ERROR_REPOSITORY_PATH, backup_name)
-            import shutil
-            shutil.copy(file_path, backup_path)
+        # Intentar adquirir el lock con timeout
+        acquired = _file_lock.acquire(timeout=LOCK_TIMEOUT)
+        if not acquired:
+            st.error(f"❌ No se pudo guardar: otro usuario está modificando el archivo. Intenta en 30 segundos.")
+            return False
         
-        # Guardar archivo actualizado
-        with pd.ExcelWriter(file_path, engine="openpyxl") as writer:
-            for sheet_name, df in sheets_dict.items():
-                safe_sheet_name = sheet_name[:31]
-                df.to_excel(writer, index=False, sheet_name=safe_sheet_name)
-        
-        return True
+        try:
+            # Crear backup
+            if os.path.exists(file_path):
+                backup_name = f"{filename[:-5]}_backup_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+                backup_path = os.path.join(ERROR_REPOSITORY_PATH, backup_name)
+                import shutil
+                shutil.copy(file_path, backup_path)
+                st.info(f"💾 Backup creado: {backup_name}")
+            
+            # Guardar archivo actualizado
+            with pd.ExcelWriter(file_path, engine="openpyxl") as writer:
+                for sheet_name, df in sheets_dict.items():
+                    safe_sheet_name = sheet_name[:31]
+                    df.to_excel(writer, index=False, sheet_name=safe_sheet_name)
+            
+            return True
+        finally:
+            # Liberar el lock siempre
+            _file_lock.release()
+            
     except Exception as e:
         st.error(f"❌ Error al guardar {filename}: {e}")
         return False
@@ -380,11 +398,8 @@ def display_editable_dataframe(df, key_prefix):
 
     # Coerciones seguras: Streamlit data_editor espera tipos compatibles con ColumnConfig
     if "Estado" in df_display.columns:
-        # Rellenar nulos antes de convertir a str
         df_display["Estado"] = df_display["Estado"].fillna("No corregido").astype(str)
-        # Evitar literal 'nan' o 'None'
         df_display["Estado"] = df_display["Estado"].replace({"nan": "No corregido", "None": "No corregido"})
-        # Asegurar que los valores están dentro de ESTADOS_VALIDOS
         df_display["Estado"] = df_display["Estado"].apply(lambda x: x if x in ESTADOS_VALIDOS else "No corregido")
 
     if "Usuario_Corrigió" in df_display.columns:
@@ -464,19 +479,22 @@ def render():
     st.title("🔍 Filtro de Errores - Repositorio Dinámico")
     st.markdown("""
     Carga excels desde el Repositorio de Errores, visualiza y marca errores como corregidos.
-    Los cambios se guardan automáticamente en el archivo original.
+    Los cambios se guardan en el archivo original.
     """)
     
     ensure_error_repository_exists()
     
     usuario_actual = st.session_state.get("usuario", {}).get("usuario", "Sistema")
     
+    # Inicializar estados de sesión
     if "current_error_file" not in st.session_state:
         st.session_state.current_error_file = None
     if "error_sheets_cache" not in st.session_state:
         st.session_state.error_sheets_cache = {}
     if "file_modified" not in st.session_state:
         st.session_state.file_modified = False
+    if "file_loaded" not in st.session_state:
+        st.session_state.file_loaded = False
     
     st.subheader("📁 Selecciona un archivo de errores")
     
@@ -487,27 +505,41 @@ def render():
         st.info("💡 Por favor, carga un archivo Excel en la carpeta antes de continuar.")
         return
     
-    error_file = st.selectbox(
-        "🗂️ Archivo de errores disponibles",
-        options=available_files,
-        help="Selecciona el archivo Excel que deseas procesar"
-    )
+    # Selector sin rerun automático
+    col1, col2 = st.columns([3, 1])
     
-    if error_file != st.session_state.current_error_file:
-        st.session_state.current_error_file = error_file
-        
-        with st.spinner(f"📂 Cargando {error_file}..."):
-            st.session_state.error_sheets_cache = load_error_file(error_file)
-        
-        st.session_state.file_modified = False
-        
-        try:
-            if hasattr(st, "rerun") and callable(st.rerun):
-                st.rerun()
-            elif hasattr(st, "experimental_rerun") and callable(st.experimental_rerun):
-                st.experimental_rerun()
-        except Exception:
-            pass
+    with col1:
+        error_file = st.selectbox(
+            "🗂️ Archivo de errores disponibles",
+            options=available_files,
+            help="Selecciona el archivo Excel que deseas procesar"
+        )
+    
+    with col2:
+        load_button = st.button(
+            "📂 Cargar Archivo",
+            type="primary",
+            use_container_width=True,
+            help="Click para cargar el archivo seleccionado"
+        )
+    
+    # Cargar archivo SOLO cuando se presiona el botón
+    if load_button:
+        if error_file != st.session_state.current_error_file:
+            st.session_state.current_error_file = error_file
+            
+            with st.spinner(f"📂 Cargando {error_file}..."):
+                st.session_state.error_sheets_cache = load_error_file(error_file)
+            
+            st.session_state.file_modified = False
+            st.session_state.file_loaded = True
+        else:
+            st.info("✅ El archivo ya estaba cargado")
+    
+    # Si no hay archivo cargado, mostrar aviso y no continuar
+    if not st.session_state.file_loaded or not st.session_state.error_sheets_cache:
+        st.warning("⚠️ Presiona 'Cargar Archivo' para comenzar")
+        return
     
     error_sheets = st.session_state.error_sheets_cache
     
@@ -515,6 +547,9 @@ def render():
         st.error(f"❌ No se encontraron datos en {error_file}")
         st.error("Por favor, verifica los logs anteriores para más información")
         return
+    
+    # Mostrar info del archivo cargado
+    st.info(f"✅ Archivo cargado: **{error_file}** | Usuario: **{usuario_actual}**")
     
     stats = generate_error_statistics(error_sheets)
     
@@ -741,13 +776,12 @@ def render():
                         key=f"download_{error_name}"
                     )
             
-            # Crear un archivo con los errores filtrados: UNA HOJA POR TIPO DE ERROR (cada hoja es el error original)
+            # Crear un archivo con los errores filtrados
             if filtered_errors:
-                # Preparar los nombres de hoja sanos y únicos
                 sheets_for_export = {}
                 seen = {}
                 for name, df in filtered_errors.items():
-                    safe = sanitize_tab_label(name)[:31]  # máximo 31 chars para Excel
+                    safe = sanitize_tab_label(name)[:31]
                     if safe in seen:
                         seen[safe] += 1
                         safe = f"{safe}_{seen[safe]}"
@@ -757,10 +791,10 @@ def render():
                 
                 if sheets_for_export:
                     st.markdown("---")
-                    st.subheader("⬇️ Descargar todo lo filtrado (Cada error en su propia hoja)")
+                    st.subheader("⬇️ Descargar todo lo filtrado")
                     excel_filtrados = export_to_excel(sheets_for_export)
                     st.download_button(
-                        label=f"⬇️ Descargar Excel por hojas (Filtrados por ubicación)",
+                        label=f"⬇️ Descargar Excel (Filtrados por ubicación)",
                         data=excel_filtrados,
                         file_name=f"{error_file[:-5]}_filtrados_{str(sector) if sector else 'todos'}_{str(manzana) if manzana else 'todos'}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -783,6 +817,7 @@ def render():
         st.write(f"**Ubicación:** {ERROR_REPOSITORY_PATH}/")
         st.write(f"**Usuario actual:** {usuario_actual}")
         st.write(f"**Hojas cargadas:** {len(error_sheets)}")
+        st.write(f"**Estado de guardado:** {'⚠️ Cambios sin guardar' if st.session_state.file_modified else '✅ Todo guardado'}")
         
         for sheet_name, df in error_sheets.items():
             corrected = (df["Estado"] == "Corregido").sum() if "Estado" in df.columns else 0
