@@ -32,10 +32,8 @@ PERMISOS_POR_PERFIL = {
     # 3 = Operador
     3: [
         "Depuración de Datos",
-        "Reglas",
         "Compilar Detalle Errores",
         "Filtro de Errores",
-        "Resultados Calidad",
         "Cerrar Sesion"
     ],
 
@@ -45,7 +43,6 @@ PERMISOS_POR_PERFIL = {
         "Reglas",
         "Compilar Detalle Errores",
         "Filtro de Errores",
-        "Resultados Calidad",
         "Cerrar Sesion"
     ],
 
@@ -55,7 +52,6 @@ PERMISOS_POR_PERFIL = {
         "Reglas",
         "Compilar Detalle Errores",
         "Filtro de Errores",
-        "Resultados Calidad",
         "Cerrar Sesion"
     ],
 }
