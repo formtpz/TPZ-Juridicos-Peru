@@ -5,19 +5,22 @@ import requests
 
 
 def _get_webhook_url() -> str | None:
-    return os.environ.get("https://discord.com/api/webhooks/1518710818831732939/-eGe7aIVtmoIe15eArQEeoleQu4H4LTE1dSlbI-6lb7M90GXmpeGEgQPaB2mgmhk2-FY")
+    return os.environ.get("DISCORD_WEBHOOK_URL")
 
 
 def _send(payload: dict) -> bool:
-    """Envía payload a Discord. Retorna True si fue exitoso."""
     url = _get_webhook_url()
     if not url:
+        print("No se encontró DISCORD_WEBHOOK_URL")
         return False
     try:
         response = requests.post(url, json=payload, timeout=10)
+        print("Status:", response.status_code)
+        print("Respuesta:", response.text)
         response.raise_for_status()
         return True
-    except requests.RequestException:
+    except requests.RequestException as e:
+        print("Error enviando a Discord:", e)
         return False
 
 
