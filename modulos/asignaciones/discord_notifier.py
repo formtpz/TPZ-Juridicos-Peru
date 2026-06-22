@@ -5,7 +5,7 @@ import requests
 
 
 def _get_webhook_url() -> str | None:
-    return os.environ.get("DISCORD_WEBHOOK_URL")
+    return os.environ.get("https://discord.com/api/webhooks/1518710818831732939/-eGe7aIVtmoIe15eArQEeoleQu4H4LTE1dSlbI-6lb7M90GXmpeGEgQPaB2mgmhk2-FY")
 
 
 def _send(payload: dict) -> bool:
