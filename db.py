@@ -4,7 +4,6 @@ import streamlit as st
 from sqlalchemy import create_engine
 from urllib.parse import urlparse
 
-@st.cache_resource
 def get_connection():
     return psycopg2.connect(st.secrets["db_credentials"]["URI"])
 
@@ -16,9 +15,12 @@ def get_engine():
 
 def execute(query: str, params=None):
     conn = get_connection()
-    cur = conn.cursor()
     try:
-        cur.execute(query, params)
-        conn.commit()
+        cur = conn.cursor()
+        try:
+            cur.execute(query, params)
+            conn.commit()
+        finally:
+            cur.close()
     finally:
-        cur.close()
+        conn.close()

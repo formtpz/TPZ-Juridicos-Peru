@@ -4,23 +4,28 @@ from db import get_connection
 def login_usuario(usuario, password):
 
     conn = get_connection()
-    cur = conn.cursor()
+    try:
+        cur = conn.cursor()
+        try:
+            cur.execute("""
+                SELECT 
+                    usuario,
+                    nombre,
+                    perfil,
+                    puesto,
+                    supervisor,
+                    horario
+                FROM public.usuarios
+                WHERE usuario = %s
+                  AND contraseña = %s
+                  AND LOWER(estado) = 'activo'
+            """, (usuario.strip(), password.strip()))
 
-    cur.execute("""
-        SELECT 
-            usuario,
-            nombre,
-            perfil,
-            puesto,
-            supervisor,
-            horario
-        FROM public.usuarios
-        WHERE usuario = %s
-          AND contraseña = %s
-          AND LOWER(estado) = 'activo'
-    """, (usuario.strip(), password.strip()))
-
-    user = cur.fetchone()
+            user = cur.fetchone()
+        finally:
+            cur.close()
+    finally:
+        conn.close()
 
     if user:
 
