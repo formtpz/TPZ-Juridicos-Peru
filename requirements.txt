@@ -6,5 +6,6 @@ folium
 streamlit-folium
 pandas
 openpyxl
+pyxlsb
 requests
 sqlalchemy
