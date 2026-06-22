@@ -3,114 +3,131 @@
 import streamlit as st
 import pandas as pd
 from io import StringIO
-from db import get_connection   # Importamos tu función para obtener conexión psycopg2
+from db import get_connection
+import unicodedata
 
+# ========= FUNCIÓN PARA LIMPIAR NOMBRES DE COLUMNAS =========
+def clean_column_name(col: str) -> str:
+    """
+    Convierte un nombre de columna a snake_case válido en SQL.
+    Ejemplos:
+        "Código Contribuyente" -> "codigo_contribuyente"
+        "Nro. Documento"       -> "nro_documento"
+        "Género"               -> "genero"
+    """
+    # 1. Convertir a minúsculas
+    col = col.lower().strip()
+    # 2. Reemplazar tildes (normalizar a ASCII)
+    col = unicodedata.normalize('NFKD', col).encode('ascii', 'ignore').decode('ascii')
+    # 3. Reemplazar espacios, puntos y otros caracteres especiales por '_'
+    col = col.replace(' ', '_').replace('.', '_').replace('-', '_')
+    # 4. Eliminar cualquier carácter que no sea alfanumérico o '_'
+    col = ''.join(c for c in col if c.isalnum() or c == '_')
+    # 5. Evitar guiones bajos múltiples
+    while '__' in col:
+        col = col.replace('__', '_')
+    return col
+
+# ========= FUNCIÓN PRINCIPAL DE CARGA CON COPY =========
 def cargar_csv_con_copy(tabla_name, archivo_csv, truncar=False, chunksize=10000):
     """
-    Carga un archivo CSV en una tabla PostgreSQL usando COPY (rápido) con chunks.
-    Retorna (exito, mensaje, filas_insertadas)
+    Carga un archivo CSV usando COPY de PostgreSQL con chunks y barra de progreso.
     """
     try:
-        # --- 1. Leer solo el header para obtener nombres de columnas ---
+        # 1. Leer el header para obtener los nombres originales
         try:
             df_sample = pd.read_csv(archivo_csv, delimiter=';', encoding='utf-8', nrows=0, dtype=str)
         except UnicodeDecodeError:
             archivo_csv.seek(0)
             df_sample = pd.read_csv(archivo_csv, delimiter=';', encoding='latin-1', nrows=0, dtype=str)
+
+        # Limpiar nombres de columnas
+        columnas_originales = df_sample.columns.tolist()
+        columnas_limpias = [clean_column_name(col) for col in columnas_originales]
         
-        columnas = df_sample.columns.tolist()
-        # Limpiar nombres: minúsculas, espacios a guion bajo, % a 'porciento'
-        columnas_clean = [
-            col.strip().lower().replace(' ', '_').replace('%', 'porciento')
-            for col in columnas
-        ]
-        
-        # --- 2. Conectar y truncar si se pide ---
+        # 2. Conectar a la BD
         conn = get_connection()
         cur = conn.cursor()
         
+        # 3. Truncar si se solicita
         if truncar:
             cur.execute(f"TRUNCATE TABLE {tabla_name} RESTART IDENTITY CASCADE;")
             conn.commit()
             st.info(f"🗑️ Tabla {tabla_name} truncada.")
         
-        # --- 3. Leer el archivo en chunks y copiar cada uno ---
+        # 4. Leer el CSV en chunks
         archivo_csv.seek(0)
         try:
             chunk_iter = pd.read_csv(
-                archivo_csv,
-                delimiter=';',
-                encoding='utf-8',
-                chunksize=chunksize,
-                dtype=str
+                archivo_csv, 
+                delimiter=';', 
+                encoding='utf-8', 
+                chunksize=chunksize, 
+                dtype=str,
+                quotechar='"'
             )
         except UnicodeDecodeError:
             archivo_csv.seek(0)
             chunk_iter = pd.read_csv(
-                archivo_csv,
-                delimiter=';',
-                encoding='latin-1',
-                chunksize=chunksize,
-                dtype=str
+                archivo_csv, 
+                delimiter=';', 
+                encoding='latin-1', 
+                chunksize=chunksize, 
+                dtype=str,
+                quotechar='"'
             )
         
+        # 5. Procesar cada chunk
         total_filas = 0
         chunk_count = 0
         
-        # Barra de progreso y texto de estado
-        progress_bar = st.progress(0, text="⏳ Iniciando carga...")
+        progress_bar = st.progress(0, text="Iniciando carga...")
         status_text = st.empty()
         
         for chunk in chunk_iter:
-            # Asignar nombres limpios a las columnas del chunk
-            chunk.columns = columnas_clean
-            # Reemplazar NaN por None (para que se inserten como NULL)
+            # Asignar nombres limpios a las columnas
+            chunk.columns = columnas_limpias
+            
+            # Reemplazar NaN por None (NULL en BD)
             chunk = chunk.where(pd.notnull(chunk), None)
             
-            # Convertir el chunk a CSV en memoria (StringIO) en formato COPY
+            # Escribir chunk a un buffer CSV en memoria (formato COPY)
             buffer = StringIO()
             chunk.to_csv(
-                buffer,
-                sep=';',
-                index=False,
-                header=False,
-                quoting=1,          # QUOTE_ALL
+                buffer, 
+                sep=';', 
+                index=False, 
+                header=False, 
+                quoting=1,          # QUOTE_ALL para manejar comillas internas
                 quotechar='"',
                 escapechar='\\',
-                na_rep=''           # los None se escriben como cadena vacía
+                na_rep=''           # valores nulos se escriben como cadena vacía
             )
             buffer.seek(0)
             
             # Construir comando COPY
-            columnas_str = ', '.join(columnas_clean)
+            columnas_str = ', '.join(columnas_limpias)
             copy_sql = f"""
-                COPY {tabla_name} ({columnas_str})
-                FROM STDIN WITH (
-                    FORMAT CSV,
-                    DELIMITER ';',
-                    QUOTE '"',
-                    ESCAPE '\\',
-                    NULL ''
-                )
+                COPY {tabla_name} ({columnas_str}) 
+                FROM STDIN WITH (FORMAT CSV, DELIMITER ';', QUOTE '"', ESCAPE '\\', NULL '')
             """
-            # Ejecutar COPY desde el buffer
+            
+            # Ejecutar COPY
             cur.copy_expert(sql=copy_sql, file=buffer)
             conn.commit()
             
+            # Actualizar estadísticas
             filas_chunk = len(chunk)
             total_filas += filas_chunk
             chunk_count += 1
             
-            # Actualizar progreso (asumimos máximo 100 chunks para la barra)
+            # Actualizar barra de progreso (estimada basada en 100 chunks máx)
             progress = min(0.99, chunk_count / 100)
-            progress_bar.progress(
-                progress,
-                text=f"⏳ Procesando chunk {chunk_count}... {total_filas} filas"
-            )
+            progress_bar.progress(progress, text=f"Chunk {chunk_count} - {total_filas} filas cargadas")
             status_text.text(f"✅ Cargadas {total_filas} filas hasta ahora...")
         
-        # Finalizar barra
-        progress_bar.progress(1.0, text="✅ ¡Carga completada!")
+        # Finalizar
+        progress_bar.progress(1.0, text="¡Carga completada!")
         status_text.text(f"✅ Total de {total_filas} filas insertadas en {tabla_name}.")
         
         cur.close()
@@ -121,24 +138,16 @@ def cargar_csv_con_copy(tabla_name, archivo_csv, truncar=False, chunksize=10000)
     except Exception as e:
         return False, f"❌ Error: {str(e)}", 0
 
-
+# ========= RENDER DE LA INTERFAZ STREAMLIT =========
 def render():
-    """
-    Interfaz principal para cargar los 3 archivos CSV a las tablas.
-    """
-    # Si usas autenticación, descomenta la siguiente línea:
+    # Si usas autenticación, descomenta:
     # from permisos import validar_acceso
     # validar_acceso("Carga Masiva de Catastro")
-    
+
     st.title("📤 Carga Masiva de Archivos CSV a PostgreSQL")
-    st.markdown(
-        """
-        Sube los tres archivos CSV correspondientes a las tablas del sistema.
-        La carga se realiza usando `COPY` de PostgreSQL para mayor velocidad.
-        """
-    )
-    
-    # Definición de las tablas
+    st.markdown("Sube los tres archivos correspondientes a las tablas del sistema.")
+    st.caption("Los nombres de columna se limpiarán automáticamente (tildes, puntos, espacios).")
+
     tablas = {
         "rentas_vs_contribuyente": {
             "label": "📄 Tabla 1: Contribuyentes",
@@ -153,16 +162,11 @@ def render():
             "help": "Archivo CSV con datos completos de predios urbanos."
         }
     }
-    
-    # Checkbox global para truncar
-    truncar_global = st.checkbox(
-        "🗑️ Truncar (eliminar datos existentes) antes de cargar",
-        value=False
-    )
-    
+
+    truncar_global = st.checkbox("🗑️ Truncar (eliminar datos existentes) antes de cargar", value=False)
     st.divider()
-    
-    # --- Para cada tabla, mostrar su uploader y botón de carga ---
+
+    # Uploaders individuales
     for tabla, config in tablas.items():
         with st.container():
             col1, col2 = st.columns([3, 1])
@@ -176,17 +180,12 @@ def render():
                 )
             with col2:
                 if archivo is not None:
-                    st.caption(f"📏 Tamaño: {archivo.size / 1024:.1f} KB")
-            
-            # Botón de carga individual
+                    st.caption(f"Tamaño: {archivo.size / 1024:.1f} KB")
+
             if archivo is not None:
                 if st.button(f"⬆️ Cargar {tabla}", key=f"btn_{tabla}"):
-                    with st.spinner(f"Cargando {tabla}..."):
-                        ok, mensaje, filas = cargar_csv_con_copy(
-                            tabla,
-                            archivo,
-                            truncar=truncar_global
-                        )
+                    with st.spinner(f"Cargando {tabla}... Esto puede tomar unos segundos."):
+                        ok, mensaje, filas = cargar_csv_con_copy(tabla, archivo, truncar=truncar_global)
                         if ok:
                             st.success(mensaje)
                             st.balloons()
@@ -194,47 +193,41 @@ def render():
                             st.error(mensaje)
             else:
                 st.info("📂 Sube un archivo CSV para cargar.")
-            
+
             st.divider()
-    
-    # --- Carga simultánea (si los 3 archivos están subidos) ---
+
+    # Carga simultánea
     st.subheader("⚡ Carga simultánea")
     archivos_subidos = [st.session_state.get(f"upload_{tabla}") for tabla in tablas.keys()]
     if all(archivos_subidos):
         if st.button("🚀 Cargar todos los archivos", type="primary"):
-            progreso = st.progress(0, text="Iniciando carga simultánea...")
+            progreso = st.progress(0, text="Iniciando...")
             exito_total = True
+            resultados = []
             for i, (tabla, archivo) in enumerate(zip(tablas.keys(), archivos_subidos)):
-                progreso.progress(
-                    (i + 0.5) / len(tablas),
-                    text=f"Cargando {tabla}..."
-                )
-                ok, mensaje, _ = cargar_csv_con_copy(
-                    tabla,
-                    archivo,
-                    truncar=truncar_global
-                )
-                if ok:
-                    st.success(f"✅ {tabla}: {mensaje}")
-                else:
-                    st.error(f"❌ {tabla}: {mensaje}")
+                progreso.progress((i + 1) / len(tablas), text=f"Cargando {tabla}...")
+                ok, mensaje, _ = cargar_csv_con_copy(tabla, archivo, truncar=truncar_global)
+                resultados.append(f"{tabla}: {'✅' if ok else '❌'} {mensaje}")
+                if not ok:
                     exito_total = False
-            progreso.progress(1.0, text="Carga finalizada")
+            progreso.empty()
+            for res in resultados:
+                if "✅" in res:
+                    st.success(res)
+                else:
+                    st.error(res)
             if exito_total:
                 st.balloons()
     else:
-        st.info("📌 Sube los tres archivos para usar la carga simultánea.")
-    
-    # --- Opcional: Ver cantidad de registros ---
+        st.info("Sube los tres archivos para usar la carga simultánea.")
+
+    # Consultar conteo de registros
     if st.button("🔍 Ver cantidad de registros en cada tabla"):
-        try:
-            conn = get_connection()
-            cur = conn.cursor()
-            for tabla in tablas.keys():
-                cur.execute(f"SELECT COUNT(*) FROM {tabla}")
-                count = cur.fetchone()[0]
-                st.write(f"**{tabla}**: {count} registros")
-            cur.close()
-            conn.close()
-        except Exception as e:
-            st.error(f"Error al consultar: {e}")
+        conn = get_connection()
+        cur = conn.cursor()
+        for tabla in tablas.keys():
+            cur.execute(f"SELECT COUNT(*) FROM {tabla}")
+            count = cur.fetchone()[0]
+            st.write(f"**{tabla}**: {count} registros")
+        cur.close()
+        conn.close()
