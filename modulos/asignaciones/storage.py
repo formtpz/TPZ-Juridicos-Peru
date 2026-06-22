@@ -68,7 +68,7 @@ def asignar_manzana(manzana: str, operador: str, supervisor: str) -> tuple[bool,
             f"La manzana '{manzana}' ya está asignada a {registro['operador']}."
         )
 
-    if registro["estado"] not in ("Sin asignar",):
+    if registro["estado"] != "Sin asignar":
         return False, (
             f"La manzana '{manzana}' está en estado '{registro['estado']}' "
             "y no puede ser asignada."

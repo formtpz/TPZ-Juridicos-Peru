@@ -70,7 +70,12 @@ if archivo is not None:
                 st.success(f"{len(manzanas_raw)} manzanas registradas (las nuevas en estado 'Sin asignar').")
 
     except Exception as e:
-        st.error(f"Error al leer el archivo: {e}")
+        if "codec" in str(e).lower() or "decode" in str(e).lower():
+            st.error("Error al leer el archivo: formato no compatible o archivo corrupto.")
+        elif "No such file" in str(e):
+            st.error("Error: no se encontró el archivo.")
+        else:
+            st.error(f"Error al procesar el archivo Excel: {e}")
 
 # ---------------------------------------------------------------------------
 # Sección 2: Asignar manzana

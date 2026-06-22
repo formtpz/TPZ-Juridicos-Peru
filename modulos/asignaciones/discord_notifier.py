@@ -17,7 +17,7 @@ def _send(payload: dict) -> bool:
         response = requests.post(url, json=payload, timeout=10)
         response.raise_for_status()
         return True
-    except Exception:
+    except requests.RequestException:
         return False
 
 

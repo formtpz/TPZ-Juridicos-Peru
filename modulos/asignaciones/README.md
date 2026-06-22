@@ -52,7 +52,6 @@ pandas
 openpyxl
 pyxlsb
 requests
-python-dotenv
 ```
 
 ## Notas
