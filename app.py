@@ -156,7 +156,12 @@ elif opcion == "Resultados Calidad":
 #    from modulos.correcciones import render
 #    render()
 
+# Cerrar sesión
+elif opcion == "RentasFiltrado":
 
+    from modulos.rentas_filtrado import render
+    render()
+    
 # Cerrar sesión
 elif opcion == "Cerrar Sesion":
 
