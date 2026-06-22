@@ -18,18 +18,14 @@ PERMISOS_POR_PERFIL = {
    
     ],
 
-    # 2 = RRHH
+    # 2 = Operador Catastral
     2: [
-        "Depuración de Datos",
-        "Reglas",
-        "Compilar Detalle Errores",
-        "Filtro de Errores",
-        "Resultados Calidad",
+        "RentasFiltrado",
         "Cerrar Sesion",
 
     ],
 
-    # 3 = Operador
+    # 3 = Juridico
     3: [
         "Depuración de Datos",
         "Compilar Detalle Errores",
