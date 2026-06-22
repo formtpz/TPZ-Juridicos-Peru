@@ -14,13 +14,18 @@ PERMISOS_POR_PERFIL = {
         "Compilar Detalle Errores",
         "Filtro de Errores",
         "Resultados Calidad",
+        "RentasFiltrado",
         "Cerrar Sesion",
    
     ],
 
     # 2 = Operador Catastral
     2: [
-        "RentasFiltrado",
+        "Depuración de Datos",
+        "Reglas",
+        "Compilar Detalle Errores",
+        "Filtro de Errores",
+        "Resultados Calidad",
         "Cerrar Sesion",
 
     ],
