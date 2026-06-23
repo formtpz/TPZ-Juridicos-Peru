@@ -3,6 +3,7 @@ import psycopg2
 import streamlit as st
 from sqlalchemy import create_engine
 from urllib.parse import urlparse
+import pandas as pd
 
 @st.cache_resource
 def get_connection():
