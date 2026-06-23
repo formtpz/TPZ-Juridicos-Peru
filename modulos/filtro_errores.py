@@ -273,15 +273,23 @@ def convert_coordinate_columns_to_string(df):
     
     for col, col_l in zip(df.columns, col_lower):
         if "sector" in col_l or "sect" in col_l or "manzana" in col_l or "manz" in col_l or "lote" in col_l:
-            df[col] = df[col].astype(str).str.strip()
-            if any(df[col].str.contains(r'\.', na=False)):
-                df[col] = df[col].str.replace(r'\.0$', '', regex=True)
+            # Normalizar nulos/vacíos y evitar literales "nan"/"none"
+            cleaned = df[col].where(~pd.isna(df[col]), "")
+            cleaned = cleaned.astype(str).str.strip()
+            cleaned = cleaned.replace({"nan": "", "None": "", "none": "", "<NA>": ""})
+
+            # Remover sufijo decimal típico de Excel (3.0 -> 3)
+            cleaned = cleaned.str.replace(r'\.0$', '', regex=True)
+
+            # Mantener solo valores no vacíos para padding
             if "lote" in col_l:
-                df[col] = df[col].apply(lambda x: x.zfill(3) if pd.notna(x) and x != '' else x)
+                cleaned = cleaned.apply(lambda x: x.zfill(3) if x != '' else x)
             elif "manzana" in col_l or "manz" in col_l:
-                df[col] = df[col].apply(lambda x: x.zfill(3) if pd.notna(x) and x != '' else x)
+                cleaned = cleaned.apply(lambda x: x.zfill(3) if x != '' else x)
             elif "sector" in col_l or "sect" in col_l:
-                df[col] = df[col].apply(lambda x: x.zfill(2) if pd.notna(x) and x != '' else x)
+                cleaned = cleaned.apply(lambda x: x.zfill(2) if x != '' else x)
+
+            df[col] = cleaned
     
     return df
 
@@ -327,8 +335,8 @@ def find_coordinate_columns(df):
 
 def filter_data(df, sector=None, manzana=None, lote=None):
     """Filtra un dataframe por sector, manzana y lote"""
-    filtered = df.copy()
-    coords_cols = find_coordinate_columns(df)
+    filtered = convert_coordinate_columns_to_string(df.copy())
+    coords_cols = find_coordinate_columns(filtered)
     
     if not coords_cols:
         return filtered
@@ -336,20 +344,20 @@ def filter_data(df, sector=None, manzana=None, lote=None):
     if sector is not None and sector != "" and "sector" in coords_cols:
         sector_col = coords_cols["sector"]
         if sector_col in filtered.columns:
-            sector_str = str(sector).zfill(2)
-            filtered = filtered[filtered[sector_col].astype(str).str.zfill(2) == sector_str]
+            sector_str = str(sector).strip().replace('.0', '').zfill(2)
+            filtered = filtered[filtered[sector_col].astype(str).str.strip() == sector_str]
     
     if manzana is not None and manzana != "" and "manzana" in coords_cols:
         manzana_col = coords_cols["manzana"]
         if manzana_col in filtered.columns:
-            manzana_str = str(manzana).zfill(3)
-            filtered = filtered[filtered[manzana_col].astype(str).str.zfill(3) == manzana_str]
+            manzana_str = str(manzana).strip().replace('.0', '').zfill(3)
+            filtered = filtered[filtered[manzana_col].astype(str).str.strip() == manzana_str]
     
     if lote is not None and lote != "" and "lote" in coords_cols:
         lote_col = coords_cols["lote"]
         if lote_col in filtered.columns:
-            lote_str = str(lote).zfill(3)
-            filtered = filtered[filtered[lote_col].astype(str).str.zfill(3) == lote_str]
+            lote_str = str(lote).strip().replace('.0', '').zfill(3)
+            filtered = filtered[filtered[lote_col].astype(str).str.strip() == lote_str]
     
     return filtered.reset_index(drop=True)
 
@@ -672,8 +680,14 @@ def render():
     elif filtro_tipo == "filtrar_por_ubicacion":
         st.subheader("📍 Filtro por Sector, Manzana y Lote")
         st.markdown("Selecciona la ubicación para ver solo esos errores")
-        
-        df_consolidated = pd.concat(error_sheets.values(), ignore_index=True).reset_index(drop=True)
+
+        # Normalizar coordenadas en todas las hojas para evitar opciones como 3.0/4.0
+        normalized_sheets = {
+            name: convert_coordinate_columns_to_string(df.copy())
+            for name, df in error_sheets.items()
+        }
+
+        df_consolidated = pd.concat(normalized_sheets.values(), ignore_index=True).reset_index(drop=True)
         coords_cols = find_coordinate_columns(df_consolidated)
         
         if not coords_cols:
@@ -685,7 +699,15 @@ def render():
         with col1:
             sector_col = coords_cols.get("sector")
             if sector_col:
-                sectors = sorted([x for x in df_consolidated[sector_col].dropna().unique() if str(x).strip()])
+                sectors = sorted(
+                    df_consolidated[sector_col]
+                    .dropna()
+                    .astype(str)
+                    .str.strip()
+                    .replace({"": None})
+                    .dropna()
+                    .unique()
+                )
                 sector = st.selectbox(
                     "Sector",
                     options=[None] + list(sectors),
@@ -701,7 +723,15 @@ def render():
         with col2:
             manzana_col = coords_cols.get("manzana")
             if manzana_col:
-                manzanas = sorted([x for x in temp_df[manzana_col].dropna().unique() if str(x).strip()])
+                manzanas = sorted(
+                    temp_df[manzana_col]
+                    .dropna()
+                    .astype(str)
+                    .str.strip()
+                    .replace({"": None})
+                    .dropna()
+                    .unique()
+                )
                 manzana = st.selectbox(
                     "Manzana",
                     options=[None] + list(manzanas),
@@ -719,7 +749,15 @@ def render():
         with col3:
             lote_col = coords_cols.get("lote")
             if lote_col:
-                lotes = sorted([x for x in temp_df2[lote_col].dropna().unique() if str(x).strip()])
+                lotes = sorted(
+                    temp_df2[lote_col]
+                    .dropna()
+                    .astype(str)
+                    .str.strip()
+                    .replace({"": None})
+                    .dropna()
+                    .unique()
+                )
                 lote = st.selectbox(
                     "Lote",
                     options=[None] + list(lotes),
@@ -729,7 +767,7 @@ def render():
                 lote = None
         
         filtered_errors = {}
-        for error_name, df_error in error_sheets.items():
+        for error_name, df_error in normalized_sheets.items():
             df_filtered = filter_data(df_error, sector, manzana, lote)
             if not df_filtered.empty:
                 filtered_errors[error_name] = df_filtered
