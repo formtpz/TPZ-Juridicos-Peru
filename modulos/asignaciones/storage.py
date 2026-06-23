@@ -1,19 +1,25 @@
-"""Persistencia de asignaciones en SQLite (colaborativa)."""
+"""Persistencia de asignaciones en SQLite."""
 
 from __future__ import annotations
 
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
+
+import pandas as pd
 
 REPO_DIR = Path(__file__).resolve().parents[2] / "Repositorio_de_Asignaciones"
 DB_FILE = REPO_DIR / "asignaciones.db"
 
-ESTADOS = ["Sin asignar", "Asignada", "Pendiente QC", "Terminada"]
+ESTADOS = ["Sin asignar", "En proceso", "Finalizada", "En conflicto"]
+ESTADOS_CIERRE = ["Finalizada", "En conflicto"]
+
 
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
 
 
 def _connect() -> sqlite3.Connection:
@@ -24,278 +30,412 @@ def _connect() -> sqlite3.Connection:
     return conn
 
 
+
 def init_db() -> None:
     with _connect() as conn:
         conn.execute(
             """
-            CREATE TABLE IF NOT EXISTS asignaciones (
+            CREATE TABLE IF NOT EXISTS manzanas (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                manzana TEXT NOT NULL UNIQUE,
-                estado TEXT NOT NULL,
-                operador TEXT,
-                supervisor TEXT,
-                fecha_asignacion TEXT,
-                fecha_cierre TEXT,
+                poligono TEXT NOT NULL,
+                manzana TEXT NOT NULL,
+                estado TEXT NOT NULL DEFAULT 'Sin asignar',
+                operador_activo TEXT,
+                supervisor_activo TEXT,
+                fecha_asignacion_activa TEXT,
+                fecha_cierre_activa TEXT,
                 created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+                updated_at TEXT NOT NULL,
+                UNIQUE(poligono, manzana)
             )
             """
         )
         conn.execute(
             """
-            CREATE TABLE IF NOT EXISTS historial (
+            CREATE TABLE IF NOT EXISTS lotes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                manzana_id INTEGER NOT NULL,
+                lote TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE(manzana_id, lote),
+                FOREIGN KEY(manzana_id) REFERENCES manzanas(id) ON DELETE CASCADE
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS historial_asignaciones (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                manzana_id INTEGER NOT NULL,
+                poligono TEXT NOT NULL,
                 manzana TEXT NOT NULL,
-                evento TEXT NOT NULL,
                 operador TEXT,
                 supervisor TEXT,
-                estado_anterior TEXT,
-                estado_nuevo TEXT,
-                timestamp TEXT NOT NULL
+                estado_inicio TEXT,
+                estado_fin TEXT,
+                fecha_asignacion TEXT,
+                fecha_cierre TEXT,
+                detalle TEXT,
+                FOREIGN KEY(manzana_id) REFERENCES manzanas(id) ON DELETE CASCADE
             )
             """
         )
         conn.commit()
 
 
-def _log_evento(
-    conn: sqlite3.Connection,
-    *,
-    manzana: str,
-    evento: str,
-    operador: str | None,
-    supervisor: str | None,
-    estado_anterior: str | None,
-    estado_nuevo: str | None,
-) -> None:
-    conn.execute(
-        """
-        INSERT INTO historial (
-            manzana, evento, operador, supervisor, estado_anterior, estado_nuevo, timestamp
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            manzana,
-            evento,
-            operador,
-            supervisor,
-            estado_anterior,
-            estado_nuevo,
-            _now_iso(),
-        ),
+
+def _normalizar_columnas(df: pd.DataFrame) -> dict[str, str]:
+    mapping = {str(col).strip().lower(): col for col in df.columns}
+    requeridas = ["poligono", "manzana", "lote"]
+    faltantes = [col for col in requeridas if col not in mapping]
+    if faltantes:
+        raise ValueError(f"Faltan columnas requeridas: {', '.join(faltantes)}")
+    return mapping
+
+
+
+def registrar_desde_dataframe(df: pd.DataFrame) -> tuple[int, int, int]:
+    """Registra/actualiza manzanas y lotes desde un DataFrame."""
+    init_db()
+    cols = _normalizar_columnas(df)
+
+    data = (
+        df[[cols["poligono"], cols["manzana"], cols["lote"]]
+        .copy()
+        .rename(columns={cols["poligono"]: "poligono", cols["manzana"]: "manzana", cols["lote"]: "lote"})
     )
+    data = data.fillna("")
+    data["poligono"] = data["poligono"].astype(str).str.strip()
+    data["manzana"] = data["manzana"].astype(str).str.strip()
+    data["lote"] = data["lote"].astype(str).str.strip()
+    data = data[(data["poligono"] != "") & (data["manzana"] != "") & (data["lote"] != "")]
+    data = data.drop_duplicates(subset=["poligono", "manzana", "lote"])
+
+    if data.empty:
+        return 0, 0, 0
+
+    now = _now_iso()
+    manzanas_creadas = 0
+    manzanas_actualizadas = 0
+    lotes_nuevos = 0
+
+    with _connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        for _, row in data.iterrows():
+            poligono = row["poligono"]
+            manzana = row["manzana"]
+            lote = row["lote"]
+
+            manzana_row = conn.execute(
+                """
+                SELECT id
+                FROM manzanas
+                WHERE poligono = ? AND manzana = ?
+                """,
+                (poligono, manzana),
+            ).fetchone()
+
+            if manzana_row is None:
+                cursor = conn.execute(
+                    """
+                    INSERT INTO manzanas (
+                        poligono, manzana, estado, operador_activo, supervisor_activo,
+                        fecha_asignacion_activa, fecha_cierre_activa, created_at, updated_at
+                    ) VALUES (?, ?, 'Sin asignar', NULL, NULL, NULL, NULL, ?, ?)
+                    """,
+                    (poligono, manzana, now, now),
+                )
+                manzana_id = cursor.lastrowid
+                manzanas_creadas += 1
+            else:
+                manzana_id = manzana_row["id"]
+                conn.execute(
+                    """
+                    UPDATE manzanas
+                    SET updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (now, manzana_id),
+                )
+                manzanas_actualizadas += 1
+
+            lote_existente = conn.execute(
+                """
+                SELECT id
+                FROM lotes
+                WHERE manzana_id = ? AND lote = ?
+                """,
+                (manzana_id, lote),
+            ).fetchone()
+            if lote_existente is None:
+                conn.execute(
+                    """
+                    INSERT INTO lotes (manzana_id, lote, created_at)
+                    VALUES (?, ?, ?)
+                    """,
+                    (manzana_id, lote, now),
+                )
+                lotes_nuevos += 1
+
+        conn.commit()
+
+    return manzanas_creadas, manzanas_actualizadas, lotes_nuevos
 
 
-def get_all() -> dict:
-    """Retorna todas las asignaciones en formato compatible con el flujo previo."""
+
+def get_all() -> list[dict[str, Any]]:
     init_db()
     with _connect() as conn:
         rows = conn.execute(
             """
-            SELECT manzana, estado, operador, supervisor, fecha_asignacion, fecha_cierre
-            FROM asignaciones
-            ORDER BY manzana
+            SELECT
+                m.id,
+                m.poligono,
+                m.manzana,
+                m.estado,
+                m.operador_activo,
+                m.supervisor_activo,
+                m.fecha_asignacion_activa,
+                m.fecha_cierre_activa,
+                m.created_at,
+                m.updated_at,
+                COUNT(l.id) AS total_lotes
+            FROM manzanas m
+            LEFT JOIN lotes l ON l.manzana_id = m.id
+            GROUP BY m.id
+            ORDER BY m.poligono, m.manzana
             """
         ).fetchall()
 
-    data: dict[str, dict] = {}
-    for r in rows:
-        data[r["manzana"]] = {
+    return [
+        {
+            "id": r["id"],
+            "poligono": r["poligono"],
+            "manzana": r["manzana"],
             "estado": r["estado"],
-            "operador": r["operador"],
-            "supervisor": r["supervisor"],
-            "fecha_asignacion": r["fecha_asignacion"],
-            "fecha_cierre": r["fecha_cierre"],
+            "operador_activo": r["operador_activo"],
+            "supervisor_activo": r["supervisor_activo"],
+            "fecha_asignacion_activa": r["fecha_asignacion_activa"],
+            "fecha_cierre_activa": r["fecha_cierre_activa"],
+            "created_at": r["created_at"],
+            "updated_at": r["updated_at"],
+            "total_lotes": r["total_lotes"],
         }
-    return data
+        for r in rows
+    ]
 
 
-def get_manzana(manzana: str) -> dict | None:
+
+def listar_poligonos() -> list[str]:
     init_db()
     with _connect() as conn:
-        r = conn.execute(
+        rows = conn.execute(
             """
-            SELECT manzana, estado, operador, supervisor, fecha_asignacion, fecha_cierre
-            FROM asignaciones
-            WHERE manzana = ?
-            """,
-            (manzana,),
-        ).fetchone()
-
-    if not r:
-        return None
-
-    return {
-        "estado": r["estado"],
-        "operador": r["operador"],
-        "supervisor": r["supervisor"],
-        "fecha_asignacion": r["fecha_asignacion"],
-        "fecha_cierre": r["fecha_cierre"],
-    }
+            SELECT DISTINCT poligono
+            FROM manzanas
+            ORDER BY poligono
+            """
+        ).fetchall()
+    return [r["poligono"] for r in rows]
 
 
-def registrar_manzanas(manzanas: list[str]) -> None:
-    """Registra manzanas nuevas con estado 'Sin asignar'."""
+
+def operador_tiene_activa(operador: str) -> dict[str, Any] | None:
     init_db()
-    now = _now_iso()
-    with _connect() as conn:
-        for m in manzanas:
-            manzana = (m or "").strip()
-            if not manzana:
-                continue
-
-            cur = conn.execute(
-                "SELECT manzana FROM asignaciones WHERE manzana = ?",
-                (manzana,),
-            ).fetchone()
-            if cur:
-                continue
-
-            conn.execute(
-                """
-                INSERT INTO asignaciones (
-                    manzana, estado, operador, supervisor, fecha_asignacion, fecha_cierre, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (manzana, "Sin asignar", None, None, None, None, now, now),
-            )
-            _log_evento(
-                conn,
-                manzana=manzana,
-                evento="registro",
-                operador=None,
-                supervisor=None,
-                estado_anterior=None,
-                estado_nuevo="Sin asignar",
-            )
-        conn.commit()
-
-
-def asignar_manzana(manzana: str, operador: str, supervisor: str) -> tuple[bool, str]:
-    """
-    Asigna una manzana a un operador.
-    Retorna (éxito, mensaje).
-    """
-    init_db()
-
-    manzana = (manzana or "").strip()
     operador = (operador or "").strip()
-    supervisor = (supervisor or "").strip()
+    if not operador:
+        return None
 
     with _connect() as conn:
         row = conn.execute(
             """
-            SELECT manzana, estado, operador
-            FROM asignaciones
-            WHERE manzana = ?
+            SELECT id, poligono, manzana, estado, operador_activo, supervisor_activo, fecha_asignacion_activa
+            FROM manzanas
+            WHERE operador_activo = ? AND estado = 'En proceso'
+            LIMIT 1
             """,
-            (manzana,),
+            (operador,),
         ).fetchone()
 
-        if not row:
-            return False, f"Manzana '{manzana}' no encontrada."
+    if row is None:
+        return None
 
-        if row["estado"] == "Asignada":
-            if row["operador"] == operador:
-                return False, f"La manzana '{manzana}' ya está asignada a {operador}."
-            return False, f"La manzana '{manzana}' ya está asignada a {row['operador']}."
+    return {
+        "id": row["id"],
+        "poligono": row["poligono"],
+        "manzana": row["manzana"],
+        "estado": row["estado"],
+        "operador_activo": row["operador_activo"],
+        "supervisor_activo": row["supervisor_activo"],
+        "fecha_asignacion_activa": row["fecha_asignacion_activa"],
+    }
 
-        if row["estado"] != "Sin asignar":
-            return (
-                False,
-                f"La manzana '{manzana}' está en estado '{row['estado']}' y no puede ser asignada.",
-            )
+
+
+def asignar_manzana(poligono: str, manzana: str, operador: str, supervisor: str) -> tuple[bool, str]:
+    init_db()
+
+    poligono = (poligono or "").strip()
+    manzana = (manzana or "").strip()
+    operador = (operador or "").strip()
+    supervisor = (supervisor or "").strip()
+
+    if not poligono or not manzana or not operador or not supervisor:
+        return False, "Polígono, manzana, operador y supervisor son obligatorios."
+
+    now = _now_iso()
+
+    with _connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
 
         activa = conn.execute(
             """
-            SELECT manzana
-            FROM asignaciones
-            WHERE operador = ? AND estado = 'Asignada'
+            SELECT poligono, manzana
+            FROM manzanas
+            WHERE operador_activo = ? AND estado = 'En proceso'
             LIMIT 1
             """,
             (operador,),
         ).fetchone()
         if activa:
+            conn.rollback()
             return (
                 False,
-                f"El operador '{operador}' ya tiene la manzana '{activa['manzana']}' activa (Asignada).",
+                f"El operador '{operador}' ya tiene activa la manzana {activa['poligono']}-{activa['manzana']}.",
             )
 
-        now = _now_iso()
-        conn.execute(
-            """
-            UPDATE asignaciones
-            SET estado = 'Asignada',
-                operador = ?,
-                supervisor = ?,
-                fecha_asignacion = ?,
-                fecha_cierre = NULL,
-                updated_at = ?
-            WHERE manzana = ?
-            """,
-            (operador, supervisor or None, now, now, manzana),
-        )
-        _log_evento(
-            conn,
-            manzana=manzana,
-            evento="asignacion",
-            operador=operador,
-            supervisor=supervisor or None,
-            estado_anterior="Sin asignar",
-            estado_nuevo="Asignada",
-        )
-        conn.commit()
-
-    return True, f"Manzana '{manzana}' asignada exitosamente a {operador}."
-
-
-def cerrar_manzana(manzana: str) -> tuple[bool, str]:
-    """
-    Cierra una manzana pasándola a 'Pendiente QC'.
-    Retorna (éxito, mensaje).
-    """
-    init_db()
-
-    manzana = (manzana or "").strip()
-    with _connect() as conn:
         row = conn.execute(
             """
-            SELECT manzana, estado, operador, supervisor
-            FROM asignaciones
-            WHERE manzana = ?
+            SELECT id, estado
+            FROM manzanas
+            WHERE poligono = ? AND manzana = ?
             """,
-            (manzana,),
+            (poligono, manzana),
         ).fetchone()
 
-        if not row:
-            return False, f"Manzana '{manzana}' no encontrada."
+        if row is None:
+            conn.rollback()
+            return False, f"No existe la manzana {poligono}-{manzana}."
 
-        if row["estado"] != "Asignada":
-            return (
-                False,
-                f"La manzana '{manzana}' está en estado '{row['estado']}'. Solo se pueden cerrar manzanas en estado 'Asignada'.",
-            )
+        if row["estado"] not in {"Sin asignar", "En conflicto"}:
+            conn.rollback()
+            return False, f"La manzana {poligono}-{manzana} está en estado '{row['estado']}' y no se puede asignar."
 
-        now = _now_iso()
         conn.execute(
             """
-            UPDATE asignaciones
-            SET estado = 'Pendiente QC',
-                fecha_cierre = ?,
+            UPDATE manzanas
+            SET estado = 'En proceso',
+                operador_activo = ?,
+                supervisor_activo = ?,
+                fecha_asignacion_activa = ?,
+                fecha_cierre_activa = NULL,
                 updated_at = ?
-            WHERE manzana = ?
+            WHERE id = ?
             """,
-            (now, now, manzana),
+            (operador, supervisor, now, now, row["id"]),
         )
-        _log_evento(
-            conn,
-            manzana=manzana,
-            evento="cierre",
-            operador=row["operador"],
-            supervisor=row["supervisor"],
-            estado_anterior="Asignada",
-            estado_nuevo="Pendiente QC",
+
+        conn.execute(
+            """
+            INSERT INTO historial_asignaciones (
+                manzana_id, poligono, manzana, operador, supervisor,
+                estado_inicio, estado_fin, fecha_asignacion, fecha_cierre, detalle
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                row["id"],
+                poligono,
+                manzana,
+                operador,
+                supervisor,
+                row["estado"],
+                "En proceso",
+                now,
+                None,
+                "Asignación activa",
+            ),
         )
+
         conn.commit()
 
-    return True, f"Manzana '{manzana}' cerrada → Pendiente QC."
+    return True, f"Manzana {poligono}-{manzana} asignada a {operador}."
+
+
+
+def cerrar_manzana(poligono: str, manzana: str, operador: str, estado_final: str) -> tuple[bool, str]:
+    init_db()
+
+    poligono = (poligono or "").strip()
+    manzana = (manzana or "").strip()
+    operador = (operador or "").strip()
+    estado_final = (estado_final or "").strip()
+
+    if estado_final not in ESTADOS_CIERRE:
+        return False, "El estado final debe ser 'Finalizada' o 'En conflicto'."
+
+    if not poligono or not manzana or not operador:
+        return False, "Polígono, manzana y operador son obligatorios."
+
+    now = _now_iso()
+
+    with _connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+
+        row = conn.execute(
+            """
+            SELECT id, estado, operador_activo, supervisor_activo, fecha_asignacion_activa
+            FROM manzanas
+            WHERE poligono = ? AND manzana = ?
+            """,
+            (poligono, manzana),
+        ).fetchone()
+
+        if row is None:
+            conn.rollback()
+            return False, f"No existe la manzana {poligono}-{manzana}."
+
+        if row["estado"] != "En proceso":
+            conn.rollback()
+            return False, f"La manzana {poligono}-{manzana} está en estado '{row['estado']}' y no se puede cerrar."
+
+        if row["operador_activo"] != operador:
+            conn.rollback()
+            return False, "Solo el operador asignado actualmente puede cerrar esta manzana."
+
+        conn.execute(
+            """
+            UPDATE manzanas
+            SET estado = ?,
+                operador_activo = NULL,
+                supervisor_activo = NULL,
+                fecha_cierre_activa = ?,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (estado_final, now, now, row["id"]),
+        )
+
+        conn.execute(
+            """
+            INSERT INTO historial_asignaciones (
+                manzana_id, poligono, manzana, operador, supervisor,
+                estado_inicio, estado_fin, fecha_asignacion, fecha_cierre, detalle
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                row["id"],
+                poligono,
+                manzana,
+                operador,
+                row["supervisor_activo"],
+                "En proceso",
+                estado_final,
+                row["fecha_asignacion_activa"],
+                now,
+                "Cierre operativo",
+            ),
+        )
+
+        conn.commit()
+
+    return True, f"Manzana {poligono}-{manzana} cerrada en estado '{estado_final}'."
