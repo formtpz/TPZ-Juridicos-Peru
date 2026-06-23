@@ -59,7 +59,7 @@ PERMISOS = {
 
     # ---------- Perfil + puesto + nombre (máxima especificidad) ----------
     "1;Coordinador;Linnette Ceciliano Calderon": [
-        "Reporte de Horas"
+        "Reporte de Horas",
         "Depuración de Datos",
         "Reglas",
         "Compilar Detalle Errores",
