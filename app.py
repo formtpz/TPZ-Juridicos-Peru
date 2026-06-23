@@ -168,7 +168,7 @@ elif opcion == "Rentas Filtrado":
 
 elif opcion == "Seguimiento Supervisor":
 
-    from modulos.seguimiento_supervisor import render
+    from modulos.seguimiento_supervision import render
     render()
     
 elif opcion == "Reporte de Horas":   
