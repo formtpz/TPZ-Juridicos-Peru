@@ -100,7 +100,7 @@ def registrar_desde_dataframe(df: pd.DataFrame) -> tuple[int, int, int]:
     cols = _normalizar_columnas(df)
 
     data = (
-        df[[cols["poligono"], cols["manzana"], cols["lote"]]
+        df[[cols["poligono"], cols["manzana"], cols["lote"]]]
         .copy()
         .rename(columns={cols["poligono"]: "poligono", cols["manzana"]: "manzana", cols["lote"]: "lote"})
     )
