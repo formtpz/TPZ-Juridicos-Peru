@@ -22,3 +22,15 @@ def execute(query: str, params=None):
         conn.commit()
     finally:
         cur.close()
+        
+def fetch_df(query: str, params=None):
+    """Ejecuta SELECT y devuelve DataFrame."""
+    conn = get_connection()
+    return pd.read_sql_query(query, con=conn, params=params)
+
+def fetch_one(query: str, params=None):
+    """Retorna primera fila como dict o None."""
+    df = fetch_df(query, params=params)
+    if df.empty:
+        return None
+    return df.iloc[0].to_dict()
