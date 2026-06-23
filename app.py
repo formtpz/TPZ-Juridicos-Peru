@@ -160,10 +160,15 @@ elif opcion == "Resultados Calidad":
 #    from modulos.correcciones import render
 #    render()
 
-# Cerrar sesión
-elif opcion == "RentasFiltrado":
+
+elif opcion == "Rentas Filtrado":
 
     from modulos.rentas_filtrado import render
+    render()
+
+elif opcion == "Seguimiento Supervisor":
+
+    from modulos.seguimiento_supervisor import render
     render()
     
 elif opcion == "Reporte de Horas":   
