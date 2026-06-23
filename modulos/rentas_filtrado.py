@@ -9,33 +9,59 @@ from db import get_engine
 @st.cache_data(ttl=3600)
 def load_filter_data():
     """
-    Carga los campos necesarios para los filtros jerárquicos desde predios urbanos.
+    Carga los campos necesarios para los filtros jerárquicos.
     """
     engine = get_engine()
     query = """
-        SELECT codigo_predio, codigo_contribuyente, manzana, lote, cod_hu
+        SELECT codigo_contribuyente, codigo_predio, manzana, lote, cod_hu 
         FROM public.rentas_vs_predio_urbano
     """
     df = pd.read_sql(query, engine)
-    # Convertir a string por si hay valores numéricos
-    df = df.astype(str)
     return df
 
 @st.cache_data(ttl=3600)
 def load_full_tables():
     """
-    Carga las tres tablas completas.
+    Carga las tres tablas completas y reordena las columnas de predios.
     """
     engine = get_engine()
     contrib = pd.read_sql("SELECT * FROM public.rentas_vs_contribuyente", engine)
     construc = pd.read_sql("SELECT * FROM public.rentas_vs_construcciones", engine)
     predios = pd.read_sql("SELECT * FROM public.rentas_vs_predio_urbano", engine)
+
+    # ===== REORDENAR COLUMNAS DE PREDIOS =====
+    # Columnas según lo solicitado (las que existen se pondrán en ese orden, el resto al final)
+    orden_deseado = [
+        'codigo_contribuyente',
+        'codigo_predio',
+        'manzana',
+        'lote',
+        'codigo_habilitacion_urbana',
+        'zona_habilitacion',
+        'fecha_adquisicion',
+        'descripcion_del_uso',
+        'tipo_predio',
+        'condicion_propiedad',
+        'porcentaje_condominio',
+        'area_terreno',
+        'area_terreno_comun',
+        'area_construida',
+        'area_construida_comun',
+        # El resto de columnas (las que no estén en la lista se pondrán al final)
+    ]
+    # Obtener todas las columnas existentes
+    columnas_existentes = predios.columns.tolist()
+    # Construir el orden final: primero las deseadas que existan, luego el resto
+    orden_final = [col for col in orden_deseado if col in columnas_existentes]
+    orden_final += [col for col in columnas_existentes if col not in orden_final]
+    predios = predios[orden_final]
+
     return contrib, construc, predios
 
 # ============ FUNCIÓN DE NORMALIZACIÓN ============
 def normalize_manzana(s):
     """
-    Elimina todo excepto letras (a-zA-Z) y convierte a minúsculas.
+    Normaliza una manzana: elimina todo excepto letras (a-zA-Z) y convierte a minúsculas.
     """
     if pd.isna(s):
         return ''
@@ -45,15 +71,15 @@ def normalize_manzana(s):
 
 # ============ FUNCIÓN PRINCIPAL DE RENDER ============
 def render():
-    st.title("🔍 Filtro Dinámico de Catastro por Predios")
+    st.title("🔍 Filtro Dinámico de Catastro")
     st.markdown("Selecciona `Código HU`, `Manzana` y `Lote` para filtrar los predios.")
 
     # --- Cargar datos con caché ---
     with st.spinner("Cargando datos..."):
-        df_filtros = load_filter_data()          # contiene codigo_predio, codigo_contribuyente, manzana, lote, cod_hu
+        df_filtros = load_filter_data()
         df_contrib, df_construc, df_predios = load_full_tables()
 
-    # --- Filtros jerárquicos sobre df_filtros ---
+    # --- Filtros jerárquicos (usando cod_hu) ---
     cod_hu_opciones = sorted(df_filtros['cod_hu'].dropna().unique())
     manzana_opciones = sorted(df_filtros['manzana'].dropna().unique())
     lote_opciones = sorted(df_filtros['lote'].dropna().unique())
@@ -65,6 +91,7 @@ def render():
         help="Selecciona uno o varios códigos HU"
     )
 
+    # Filtrar manzanas según cod_hu seleccionado
     if selected_cod_hu:
         manzanas_filtradas = sorted(
             df_filtros[df_filtros['cod_hu'].isin(selected_cod_hu)]['manzana'].dropna().unique()
@@ -79,6 +106,7 @@ def render():
         help="Selecciona una o varias manzanas"
     )
 
+    # Filtrar lotes según cod_hu y manzana seleccionados
     mask_lotes = pd.Series(True, index=df_filtros.index)
     if selected_cod_hu:
         mask_lotes &= df_filtros['cod_hu'].isin(selected_cod_hu)
@@ -93,7 +121,7 @@ def render():
         help="Selecciona uno o varios lotes"
     )
 
-    # --- Aplicar filtros para obtener predios candidatos ---
+    # --- Aplicar filtros jerárquicos para obtener los predios candidatos ---
     mask_filtros = pd.Series(True, index=df_filtros.index)
     if selected_cod_hu:
         mask_filtros &= df_filtros['cod_hu'].isin(selected_cod_hu)
@@ -103,10 +131,11 @@ def render():
         mask_filtros &= df_filtros['lote'].isin(selected_lote)
 
     df_filtrado_ubicacion = df_filtros[mask_filtros]
-    # Lista de codigo_predio candidatos
-    predios_candidatos = sorted(df_filtrado_ubicacion['codigo_predio'].dropna().unique())
+    # Obtener lista de codigo_predio y codigo_contribuyente de los predios filtrados
+    predios_candidatos = df_filtrado_ubicacion[['codigo_predio', 'codigo_contribuyente']].drop_duplicates()
+    # Para la selección usaremos codigo_predio, pero también guardamos el contribuyente asociado
 
-    # --- Nota informativa de otras manzanas con la misma letra ---
+    # --- Mostrar nota informativa sobre otras manzanas con la misma letra ---
     if selected_cod_hu and selected_manzana:
         todas_manzanas_codhu = df_filtros[df_filtros['cod_hu'].isin(selected_cod_hu)]['manzana'].dropna().unique()
         selected_normalized = {normalize_manzana(m) for m in selected_manzana}
@@ -120,30 +149,31 @@ def render():
         else:
             st.success("✅ Las manzanas seleccionadas cubren todas las existentes con esa letra para ese código HU.")
 
-    # --- Tabla resumen de predios ---
+    # --- Tabla resumen de predios encontrados ---
     st.subheader("📋 Predios encontrados")
     if not df_filtrado_ubicacion.empty:
-        # Mostrar tabla con codigo_predio, codigo_contribuyente, manzana, lote, cod_hu
+        # Mostrar tabla resumen con codigo_predio, codigo_contribuyente, manzana, lote, cod_hu
         tabla_resumen = df_filtrado_ubicacion[['codigo_predio', 'codigo_contribuyente', 'manzana', 'lote', 'cod_hu']].drop_duplicates()
         st.dataframe(tabla_resumen, use_container_width=True)
 
-        # Selección de predios
-        st.markdown("### Selecciona los predios (por código) para visualizar sus datos completos")
+        # --- Selección de predios por código_predio ---
+        st.markdown("### Selecciona los predios para visualizar sus datos completos")
 
-        # Multiselect con búsqueda
+        # Opción 1: Multiselect con búsqueda (usando codigo_predio)
+        opciones_predios = sorted(predios_candidatos['codigo_predio'].dropna().unique())
         selected_predios_multiselect = st.multiselect(
             "Selecciona predios (puedes buscar por código)",
-            options=predios_candidatos,
+            options=opciones_predios,
             default=[],
             help="Escribe el código de predio para buscar"
         )
 
-        # Ingreso manual de códigos de predio
+        # Opción 2: Ingreso manual de códigos de predio
         st.markdown("o ingresa códigos de predio manualmente (separados por comas o espacios):")
         manual_input = st.text_area(
-            "Códigos manuales",
+            "Códigos de predio manuales",
             placeholder="Ej: 116707, 116706, 116705",
-            help="Escribe los códigos de predio separados por comas o espacios."
+            help="Escribe los códigos separados por comas o espacios."
         )
 
         # Unir ambas selecciones
@@ -159,22 +189,25 @@ def render():
             if not predios_seleccionados:
                 st.warning("No has seleccionado ningún predio.")
             else:
-                # Obtener los codigos_contribuyente asociados a esos predios
-                mask_predios_sel = df_filtros['codigo_predio'].isin(predios_seleccionados)
-                contribuyentes_asociados = df_filtros.loc[mask_predios_sel, 'codigo_contribuyente'].dropna().unique().tolist()
+                # Obtener los códigos de contribuyente asociados a los predios seleccionados
+                contribuyentes_asociados = df_filtrado_ubicacion[
+                    df_filtrado_ubicacion['codigo_predio'].isin(predios_seleccionados)
+                ]['codigo_contribuyente'].dropna().unique().tolist()
 
-                # Filtrar tabla de contribuyentes por codigo_contribuyente
+                # --- Filtrar las tres tablas ---
+                # Tabla contribuyentes: por codigo_contribuyente
                 mask_contrib = df_contrib['codigo_contribuyente'].isin(contribuyentes_asociados)
                 df_contrib_filt = df_contrib[mask_contrib]
 
-                # Filtrar construcciones y predios por codigo_predio
+                # Tabla construcciones: por codigo_predio
                 mask_construc = df_construc['codigo_predio'].isin(predios_seleccionados)
                 df_construc_filt = df_construc[mask_construc]
 
-                mask_predios_full = df_predios['codigo_predio'].isin(predios_seleccionados)
-                df_predios_filt = df_predios[mask_predios_full]
+                # Tabla predios: por codigo_predio
+                mask_predios = df_predios['codigo_predio'].isin(predios_seleccionados)
+                df_predios_filt = df_predios[mask_predios]
 
-                st.success(f"Mostrando datos para {len(predios_seleccionados)} predio(s) que involucran {len(contribuyentes_asociados)} contribuyente(s).")
+                st.success(f"Mostrando datos para {len(predios_seleccionados)} predio(s) y {len(contribuyentes_asociados)} contribuyente(s).")
 
                 with st.expander("📄 Contribuyentes", expanded=True):
                     st.dataframe(df_contrib_filt, use_container_width=True)
@@ -183,10 +216,11 @@ def render():
                     st.dataframe(df_construc_filt, use_container_width=True)
 
                 with st.expander("🏠 Predios Urbanos", expanded=True):
+                    # Mostrar predios con el orden de columnas ya definido
                     st.dataframe(df_predios_filt, use_container_width=True)
 
     else:
         st.warning("No se encontraron predios con los filtros seleccionados.")
 
     st.divider()
-    st.caption(f"Total de contribuyentes: {len(df_contrib)} | Total de predios: {len(df_predios)} | Total de construcciones: {len(df_construc)}")
+    st.caption(f"Total de contribuyentes: {len(df_contrib)} | Predios: {len(df_predios)} | Construcciones: {len(df_construc)}")
