@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -14,7 +14,9 @@ REPO_DIR = Path(__file__).resolve().parents[2] / "Repositorio_de_Asignaciones"
 DB_FILE = REPO_DIR / "asignaciones.db"
 
 ESTADOS = ["Sin asignar", "En proceso", "Finalizada", "En conflicto"]
-ESTADOS_CIERRE = ["Finalizada", "En conflicto"]
+ESTADO_FINALIZADA = "Finalizada"
+ESTADO_CONFLICTO = "En conflicto"
+ESTADOS_CIERRE = [ESTADO_FINALIZADA, ESTADO_CONFLICTO]
 
 
 def _now_iso() -> str:
@@ -74,7 +76,7 @@ def init_db() -> None:
         )
 
 
-def _normalize_columns(df: pd.DataFrame | Any) -> tuple[str, str, str]:
+def _normalize_columns(df: pd.DataFrame) -> tuple[str, str, str]:
     col_map = {str(c).strip().lower(): c for c in df.columns}
     required = {"poligono", "manzana", "lote"}
     missing = required.difference(col_map.keys())
@@ -84,7 +86,7 @@ def _normalize_columns(df: pd.DataFrame | Any) -> tuple[str, str, str]:
     return col_map["poligono"], col_map["manzana"], col_map["lote"]
 
 
-def registrar_desde_dataframe(df: pd.DataFrame | Any) -> dict:
+def registrar_desde_dataframe(df: pd.DataFrame) -> dict:
     """
     Registra/actualiza datos desde DataFrame con columnas Poligono/Manzana/Lote.
     Retorna resumen de inserciones.

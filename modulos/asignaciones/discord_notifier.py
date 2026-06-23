@@ -15,6 +15,7 @@ def _send(payload: dict) -> bool:
     """Envía payload a Discord. Retorna True si fue exitoso."""
     url = _get_webhook_url()
     if not url:
+        logger.debug("DISCORD_WEBHOOK_URL no configurado; se omite notificación.")
         return False
     try:
         response = requests.post(url, json=payload, timeout=10)

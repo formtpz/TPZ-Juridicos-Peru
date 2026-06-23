@@ -227,7 +227,13 @@ else:
 
     avance = (
         df_f.groupby("Poligono", as_index=False)
-        .agg(total_manzanas=("Manzana", "count"), finalizadas=("Estado", lambda s: (s == "Finalizada").sum()))
+        .agg(
+            total_manzanas=("Manzana", "count"),
+            finalizadas=(
+                "Estado",
+                lambda s: (s == storage.ESTADO_FINALIZADA).sum(),
+            ),
+        )
     )
     if not avance.empty:
         avance["avance_%"] = (avance["finalizadas"] / avance["total_manzanas"] * 100).round(2)
@@ -235,11 +241,12 @@ else:
         st.dataframe(avance, use_container_width=True)
 
     st.subheader("Tabla colaborativa")
-    st.dataframe(df_f.sort_values(["Poligono", "Manzana"]), use_container_width=True)
+    df_export = df_f.sort_values(["Poligono", "Manzana"])
+    st.dataframe(df_export, use_container_width=True)
 
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        df_f.sort_values(["Poligono", "Manzana"]).to_excel(
+        df_export.to_excel(
             writer, sheet_name="estado_actual", index=False
         )
         if not avance.empty:
