@@ -83,37 +83,37 @@ def cargar_datos_personal(fechas, personal):
 # FUNCIONES DE PROCESAMIENTO
 # ============================================================
 
-def generar_resumen_horas(df_r, df_c, df_o):
+def generar_resumen_horas(df_r, df_c, df_o, personal, fechas):
     """
-    Genera tabla con horas diarias por persona:
-    horas_produccion, horas_capacitacion, horas_otros, total
+    Genera tabla con horas diarias por persona, incluyendo todas las combinaciones
+    de personal y fechas en el rango.
     """
-    # Producción: agrupar por nombre, fecha sumando horas
+    # Crear todas las combinaciones de personal x fecha
+    fechas_range = pd.date_range(start=fechas[0], end=fechas[1], freq='D')
+    all_comb = pd.DataFrame([
+        (nombre, fecha.date())
+        for nombre in personal
+        for fecha in fechas_range
+    ], columns=['nombre', 'fecha'])
+
+    # Agrupar datos de producción
     if not df_r.empty:
         prod = df_r.groupby(['nombre', 'fecha'], as_index=False)['horas'].sum().rename(columns={'horas': 'horas_produccion'})
     else:
         prod = pd.DataFrame(columns=['nombre', 'fecha', 'horas_produccion'])
 
-    # Capacitación
     if not df_c.empty:
         cap = df_c.groupby(['nombre', 'fecha'], as_index=False)['horas'].sum().rename(columns={'horas': 'horas_capacitacion'})
     else:
         cap = pd.DataFrame(columns=['nombre', 'fecha', 'horas_capacitacion'])
 
-    # Otros
     if not df_o.empty:
         otros = df_o.groupby(['nombre', 'fecha'], as_index=False)['horas'].sum().rename(columns={'horas': 'horas_otros'})
     else:
         otros = pd.DataFrame(columns=['nombre', 'fecha', 'horas_otros'])
 
-    # Combinar
-    combined = pd.concat([prod, cap, otros], axis=0, ignore_index=True)
-    if combined.empty:
-        return pd.DataFrame()
-
-    # Obtener todas las combinaciones nombre-fecha
-    keys = combined[['nombre', 'fecha']].drop_duplicates()
-    merged = keys.merge(prod, on=['nombre', 'fecha'], how='left')
+    # Combinar con all_comb
+    merged = all_comb.merge(prod, on=['nombre', 'fecha'], how='left')
     merged = merged.merge(cap, on=['nombre', 'fecha'], how='left')
     merged = merged.merge(otros, on=['nombre', 'fecha'], how='left')
     merged = merged.fillna(0)
@@ -121,9 +121,12 @@ def generar_resumen_horas(df_r, df_c, df_o):
     # Calcular total
     merged['total'] = merged['horas_produccion'] + merged['horas_capacitacion'] + merged['horas_otros']
 
-    # Redondear a 2 decimales
+    # Redondear
     for col in ['horas_produccion', 'horas_capacitacion', 'horas_otros', 'total']:
         merged[col] = merged[col].round(2)
+
+    # Marcar si tiene al menos un reporte (si alguna columna de horas es > 0)
+    merged['tiene_reporte'] = (merged['horas_produccion'] > 0) | (merged['horas_capacitacion'] > 0) | (merged['horas_otros'] > 0)
 
     return merged
 
@@ -203,37 +206,17 @@ def render():
     with st.spinner("Cargando datos..."):
         df_r, df_c, df_o = cargar_datos_personal((fecha_inicio, fecha_fin), personal_asignado)
 
-    if df_r.empty and df_c.empty and df_o.empty:
-        st.info("No hay datos para el período seleccionado.")
-        return
+    # --- [OPCIONAL] Depuración: mostrar dataframes crudos ---
+    # st.subheader("Depuración (datos crudos)")
+    # st.write("Registro:", df_r.head())
+    # st.write("Capacitaciones:", df_c.head())
+    # st.write("Otros:", df_o.head())
 
     # --- 1. Resumen de Horas (solo casos a revisar) ---
     st.subheader("📋 Resumen de Horas Diarias (Casos a revisar)")
 
-    # Generar resumen de horas (solo con lo que existe)
-    df_horas = generar_resumen_horas(df_r, df_c, df_o)
-
-    # Obtener todos los días del rango
-    fechas_range = pd.date_range(start=fecha_inicio, end=fecha_fin, freq='D')
-    # Crear todas las combinaciones de personal x fecha
-    all_combinations = pd.DataFrame([
-        (nombre, fecha.date())
-        for nombre in personal_asignado
-        for fecha in fechas_range
-    ], columns=['nombre', 'fecha'])
-
-    # Merge para incluir a todos, detectando ausencias
-    df_horas_completo = all_combinations.merge(
-        df_horas,
-        on=['nombre', 'fecha'],
-        how='left'
-    )
-    # Marcar si tiene reporte (si al menos una columna de horas no es NaN)
-    df_horas_completo['tiene_reporte'] = df_horas_completo['horas_produccion'].notna()
-    # Rellenar NaN con 0
-    for col in ['horas_produccion', 'horas_capacitacion', 'horas_otros', 'total']:
-        if col in df_horas_completo.columns:
-            df_horas_completo[col] = df_horas_completo[col].fillna(0)
+    # Generar resumen de horas con todas las combinaciones
+    df_horas_completo = generar_resumen_horas(df_r, df_c, df_o, personal_asignado, (fecha_inicio, fecha_fin))
 
     # Filtrar solo los que NO tienen 8.5 (los casos a revisar)
     df_a_mostrar = df_horas_completo[df_horas_completo['total'] != 8.5]
@@ -280,7 +263,6 @@ def render():
     if df_prod.empty:
         st.info("No hay datos de producción.")
     else:
-        # Mostrar tabla completa
         st.dataframe(df_prod, use_container_width=True)
 
         # --- Tabla de bajo rendimiento (diferencia negativa) ---
