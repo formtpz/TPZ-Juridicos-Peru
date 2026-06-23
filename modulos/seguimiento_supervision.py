@@ -232,11 +232,14 @@ def render():
     if df_horas.empty:
         st.info("No se encontraron horas registradas.")
     else:
-        # Aplicar estilo
-        styled_horas = df_horas.style.applymap(
-            lambda x: 'background-color: #90EE90' if x == 8.5 else ('background-color: #FFD700' if x != 8.5 else ''),
-            subset=['total']
-        )
+        # Aplicar estilo a la columna 'total'
+        def color_total(val):
+            if val == 8.5:
+                return 'background-color: #90EE90'  # verde
+            else:
+                return 'background-color: #FFD700'  # amarillo
+    
+        styled_horas = df_horas.style.map(color_total, subset=['total'])
         st.dataframe(styled_horas, use_container_width=True)
 
         # --- Tabla "Casos a revisar" ---
