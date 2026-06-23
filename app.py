@@ -166,6 +166,10 @@ elif opcion == "RentasFiltrado":
     from modulos.rentas_filtrado import render
     render()
     
+elif opcion == "Reporte de Horas":   
+    from modulos.reporte_horas import render
+    render()
+    
 # Cerrar sesión
 elif opcion == "Cerrar Sesion":
 
