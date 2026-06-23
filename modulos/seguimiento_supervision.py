@@ -1,4 +1,4 @@
-# modulos/supervisor_resumen.py
+# modulos/seguimiento_supervision.py
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -165,23 +165,6 @@ def generar_produccion_diaria(df_r):
 
 
 # ============================================================
-# FUNCIONES DE VISUALIZACIÓN (con estilo)
-# ============================================================
-
-def apply_color_to_total(df):
-    """
-    Aplica estilo a la columna 'total': verde si == 8.5, amarillo si no.
-    Devuelve un DataFrame con columna 'estado' (opcional) o usa st.dataframe con styled.
-    """
-    def color_total(val):
-        if val == 8.5:
-            return 'background-color: #90EE90'  # verde claro
-        else:
-            return 'background-color: #FFD700'  # amarillo
-    return df.style.applymap(color_total, subset=['total'])
-
-
-# ============================================================
 # FUNCIÓN PRINCIPAL RENDER
 # ============================================================
 
@@ -195,15 +178,13 @@ def render():
     nombre_supervisor = usuario.get("nombre")
     puesto = usuario.get("puesto", "")
 
-    # Verificar que sea supervisor o coordinador (o que tenga personal a cargo)
-    # Por simplicidad, asumimos que si tiene personal asignado, se le muestra el módulo.
-    # Si no, mostramos mensaje.
+    # Obtener personal asignado
     personal_asignado = obtener_personal_asignado(nombre_supervisor)
     if not personal_asignado:
         st.warning("No tiene personal a cargo para supervisar.")
         return
 
-    st.title("📊 Resumen de Supervisor")
+    st.title("📊 Seguimiento de Supervisor")
     st.markdown(f"**Supervisor:** {nombre_supervisor} | **Personal a cargo:** {len(personal_asignado)}")
 
     # --- Filtro de fechas ---
@@ -226,33 +207,72 @@ def render():
         st.info("No hay datos para el período seleccionado.")
         return
 
-    # --- 1. Resumen de Horas ---
-    st.subheader("📋 Resumen de Horas Diarias")
+    # --- 1. Resumen de Horas (solo casos a revisar) ---
+    st.subheader("📋 Resumen de Horas Diarias (Casos a revisar)")
+
+    # Generar resumen de horas (solo con lo que existe)
     df_horas = generar_resumen_horas(df_r, df_c, df_o)
-    if df_horas.empty:
-        st.info("No se encontraron horas registradas.")
+
+    # Obtener todos los días del rango
+    fechas_range = pd.date_range(start=fecha_inicio, end=fecha_fin, freq='D')
+    # Crear todas las combinaciones de personal x fecha
+    all_combinations = pd.DataFrame([
+        (nombre, fecha.date())
+        for nombre in personal_asignado
+        for fecha in fechas_range
+    ], columns=['nombre', 'fecha'])
+
+    # Merge para incluir a todos, detectando ausencias
+    df_horas_completo = all_combinations.merge(
+        df_horas,
+        on=['nombre', 'fecha'],
+        how='left'
+    )
+    # Marcar si tiene reporte (si al menos una columna de horas no es NaN)
+    df_horas_completo['tiene_reporte'] = df_horas_completo['horas_produccion'].notna()
+    # Rellenar NaN con 0
+    for col in ['horas_produccion', 'horas_capacitacion', 'horas_otros', 'total']:
+        if col in df_horas_completo.columns:
+            df_horas_completo[col] = df_horas_completo[col].fillna(0)
+
+    # Filtrar solo los que NO tienen 8.5 (los casos a revisar)
+    df_a_mostrar = df_horas_completo[df_horas_completo['total'] != 8.5]
+
+    if df_a_mostrar.empty:
+        st.success("✅ Todos los días registran 8.5 horas exactas.")
     else:
-        # Aplicar estilo a la columna 'total'
-        def color_total(val):
-            if val == 8.5:
-                return 'background-color: #90EE90'  # verde
+        # Aplicar estilo: rojo si no tiene reporte, amarillo si tiene pero no es 8.5
+        def color_row(row):
+            if not row['tiene_reporte']:
+                return ['background-color: #FF4444; color: white'] * len(row)
             else:
-                return 'background-color: #FFD700'  # amarillo
-    
-        styled_horas = df_horas.style.map(color_total, subset=['total'])
+                return ['background-color: #FFD700'] * len(row)  # amarillo
+
+        styled_horas = df_a_mostrar.style.apply(color_row, axis=1)
         st.dataframe(styled_horas, use_container_width=True)
 
-        # --- Tabla "Casos a revisar" ---
-        st.subheader("🔍 Casos a revisar (horas diferentes a 8.5)")
-        casos = df_horas[df_horas['total'] != 8.5].copy()
-        if casos.empty:
-            st.success("✅ Todos los días registran 8.5 horas exactas.")
-        else:
-            casos['Caso'] = casos['total'].apply(
-                lambda x: f"Faltan {8.5 - x:.2f} horas" if x < 8.5 else f"Excedente de {x - 8.5:.2f} horas"
-            )
-            casos_vista = casos[['nombre', 'fecha', 'total', 'Caso']]
-            st.dataframe(casos_vista, use_container_width=True)
+        # --- Tabla "Casos a revisar" con descripción ---
+        st.subheader("🔍 Detalle de Casos a Revisar")
+        casos = df_a_mostrar.copy()
+        # Crear columna 'Caso'
+        def determinar_caso(row):
+            if not row['tiene_reporte']:
+                return "Sin Reportes"
+            elif row['total'] < 8.5:
+                return f"Faltan {8.5 - row['total']:.2f} horas"
+            else:  # > 8.5
+                return f"Excedente de {row['total'] - 8.5:.2f} horas"
+
+        casos['Caso'] = casos.apply(determinar_caso, axis=1)
+        casos_vista = casos[['nombre', 'fecha', 'total', 'Caso']]
+
+        # Resaltar "Sin Reportes" en rojo
+        def color_caso(val):
+            if val == "Sin Reportes":
+                return 'color: red; font-weight: bold'
+            return ''
+        styled_casos = casos_vista.style.map(color_caso, subset=['Caso'])
+        st.dataframe(styled_casos, use_container_width=True)
 
     # --- 2. Producción Diaria por Proceso ---
     st.subheader("📈 Producción Diaria por Proceso")
@@ -273,7 +293,7 @@ def render():
             bajo_vista = bajo_rendimiento[['fecha', 'nombre', 'proceso', 'diferencia', 'Faltante']]
             st.dataframe(bajo_vista, use_container_width=True)
 
-    # --- Opcional: Exportar ---
+    # --- Opcional: Actualizar ---
     st.divider()
     if st.button("🔄 Actualizar datos", type="secondary"):
         st.cache_data.clear()
