@@ -47,12 +47,9 @@ PERMISOS_POR_PERFIL = {
         "Cerrar Sesion"
     ],
 
-    # 5 = Supervisor
+    # 5 = Pruebas
     5: [
-        "Depuración de Datos",
-        "Reglas",
-        "Compilar Detalle Errores",
-        "Filtro de Errores",
+        "RentasFiltrado",
         "Cerrar Sesion"
     ],
 }
