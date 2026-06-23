@@ -41,10 +41,20 @@ def render():
 
     col1, col2 = st.columns(2)
     with col1:
+        # --- Preseleccionar a Linnette si ella es la usuaria actual ---
+        usuario_actual = st.session_state.get("usuario", {})
+        nombre_usuario_actual = usuario_actual.get("nombre", "")
+        
+        # Solo si el nombre coincide exactamente con "Linnette Ceciliano Calderon"
+        if nombre_usuario_actual == "Linnette Ceciliano Calderon":
+            default_personal = ["Linnette Ceciliano Calderon"]
+        else:
+            default_personal = []
+        
         personal_seleccionado = st.multiselect(
             "Personal",
             options=lista_personal,
-            help="Seleccione uno o varios empleados"
+            default=default_personal   # <--- Aquí se aplica el default
         )
         fecha_registro = st.date_input(
             "Fecha",
