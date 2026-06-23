@@ -34,7 +34,7 @@ def cargar_descripcion():
 # ============================================================
 @st.cache_data(ttl=60)
 def cargar_datos_calidad():
-    engine = get_engine()
+    engine = fetch_df()
     query = "SELECT * FROM public.calidad_externa"
     df = pd.read_sql(query, engine)
     return df
