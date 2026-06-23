@@ -1,12 +1,14 @@
+# auth.py
 import streamlit as st
-from db import get_connection
+from db import fetch_one  # <--- Importamos fetch_one en lugar de get_connection
 
 def login_usuario(usuario, password):
+    # Limpiar espacios
+    usuario_clean = usuario.strip()
+    password_clean = password.strip()
 
-    conn = get_connection()
-    cur = conn.cursor()
-
-    cur.execute("""
+    # Consulta usando fetch_one (que ya maneja la conexión con st.connection)
+    query = """
         SELECT 
             usuario,
             nombre,
@@ -18,22 +20,19 @@ def login_usuario(usuario, password):
         WHERE usuario = %s
           AND contraseña = %s
           AND LOWER(estado) = 'activo'
-    """, (usuario.strip(), password.strip()))
-
-    user = cur.fetchone()
+    """
+    user = fetch_one(query, params=[usuario_clean, password_clean])
 
     if user:
-
+        # user es un diccionario con las claves de los SELECT
         st.session_state["usuario"] = {
-            "cedula": user[0],      # mantenemos nombre cedula para compatibilidad
-            "nombre": user[1],
-            "perfil": int(user[2]), # convertimos perfil a número
-            "puesto": user[3],
-            "supervisor": user[4],
-            "horario": user[5]
+            "cedula": user["usuario"],        # mantienes compatibilidad
+            "nombre": user["nombre"],
+            "perfil": int(user["perfil"]),    # convertimos a int
+            "puesto": user["puesto"],
+            "supervisor": user["supervisor"],
+            "horario": user["horario"]
         }
-
         st.rerun()
-
     else:
         st.error("Credenciales incorrectas o usuario inactivo")
