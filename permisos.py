@@ -11,7 +11,8 @@ PERMISOS = {
         "Compilar Detalle Errores",
         "Filtro de Errores",
         "Resultados Calidad",
-        "RentasFiltrado",
+        "Rentas Filtrado",
+        "Seguimiento Supervisor",
         "Cerrar Sesion",
     ],
     "2": [
@@ -36,7 +37,7 @@ PERMISOS = {
         "Cerrar Sesion"
     ],
     "5": [
-        "RentasFiltrado",
+        "Rentas Filtrado",
         "Cerrar Sesion"
     ],
 
