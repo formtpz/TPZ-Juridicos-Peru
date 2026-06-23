@@ -1,14 +1,11 @@
-# auth.py
+# auth.py (sin cambios)
 import streamlit as st
-from db import fetch_one  # <--- Importamos fetch_one en lugar de get_connection
+from db import get_connection
 
 def login_usuario(usuario, password):
-    # Limpiar espacios
-    usuario_clean = usuario.strip()
-    password_clean = password.strip()
-
-    # Consulta usando fetch_one (que ya maneja la conexión con st.connection)
-    query = """
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
         SELECT 
             usuario,
             nombre,
@@ -20,18 +17,23 @@ def login_usuario(usuario, password):
         WHERE usuario = %s
           AND contraseña = %s
           AND LOWER(estado) = 'activo'
-    """
-    user = fetch_one(query, params=[usuario_clean, password_clean])
-
+    """, (usuario.strip(), password.strip()))
+    
+    user = cur.fetchone()
+    cur.close()
+    # No liberamos explícitamente porque la conexión se devuelve al pool al cerrar
+    # Pero para ser más ordenados, podríamos hacer:
+    # from db import release_connection
+    # release_connection(conn)
+    
     if user:
-        # user es un diccionario con las claves de los SELECT
         st.session_state["usuario"] = {
-            "cedula": user["usuario"],        # mantienes compatibilidad
-            "nombre": user["nombre"],
-            "perfil": int(user["perfil"]),    # convertimos a int
-            "puesto": user["puesto"],
-            "supervisor": user["supervisor"],
-            "horario": user["horario"]
+            "cedula": user[0],
+            "nombre": user[1],
+            "perfil": int(user[2]),
+            "puesto": user[3],
+            "supervisor": user[4],
+            "horario": user[5]
         }
         st.rerun()
     else:
