@@ -42,12 +42,8 @@ PERMISOS = {
     ],
 
     # ---------- Perfil + puesto (sobrescriben al perfil base) ----------
-    "2;Analista Senior": [
-        "Depuración de Datos",
-        "Reglas",
-        "Compilar Detalle Errores",
-        "Filtro de Errores",
-        "Resultados Calidad",
+    "2;Supervisor": [
+        "Seguimiento Supervisor",
         "Cerrar Sesion"
     ],
     "4;Control Calidad": [
