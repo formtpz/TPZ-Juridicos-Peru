@@ -4,7 +4,7 @@ import streamlit as st
 # PERMISOS POR CLAVE (jerárquico)
 # =====================================================
 PERMISOS = {
-    # Perfiles base (clave = str(perfil))
+    # ---------- Perfiles base (clave = str(perfil)) ----------
     "1": [
         "Depuración de Datos",
         "Reglas",
@@ -40,7 +40,7 @@ PERMISOS = {
         "Cerrar Sesion"
     ],
 
-    # Especificaciones por perfil + puesto
+    # ---------- Perfil + puesto (sobrescriben al perfil base) ----------
     "2;Analista Senior": [
         "Depuración de Datos",
         "Reglas",
@@ -57,13 +57,13 @@ PERMISOS = {
         "Cerrar Sesion"
     ],
 
-    # Especificaciones por perfil + puesto + nombre
+    # ---------- Perfil + puesto + nombre (máxima especificidad) ----------
     "4;Control Calidad;Linnette Ceciliano": [
         "Depuración de Datos",
         "Reglas",
         "Compilar Detalle Errores",
         "Filtro de Errores",
-        "Resultados Calidad",   # adicional
+        "Resultados Calidad",   # opción extra que no tiene el perfil 4 base
         "Cerrar Sesion"
     ],
     "2;Analista;Juan Perez": [
@@ -84,27 +84,22 @@ def obtener_permisos(perfil, puesto=None, nombre=None):
     3. perfil (siempre debe existir)
     Si no se encuentra ninguna, devuelve lista vacía.
     """
-    # Convertir perfil a string por si es int
-    perfil_str = str(perfil)
+    perfil_str = str(perfil)  # por si es int
     
-    # Clave con nombre
+    # 1. Clave con nombre (si existe)
     if nombre:
         clave = f"{perfil_str};{puesto};{nombre}" if puesto else f"{perfil_str};{nombre}"
         if clave in PERMISOS:
             return PERMISOS[clave]
     
-    # Clave con puesto
+    # 2. Clave con puesto (si existe)
     if puesto:
         clave = f"{perfil_str};{puesto}"
         if clave in PERMISOS:
             return PERMISOS[clave]
     
-    # Clave solo perfil
-    if perfil_str in PERMISOS:
-        return PERMISOS[perfil_str]
-    
-    # Si no hay nada, devolver vacío
-    return []
+    # 3. Clave solo perfil
+    return PERMISOS.get(perfil_str, [])
 
 # =====================================================
 # FUNCIÓN PARA VALIDAR ACCESO (actualizada)
@@ -116,7 +111,7 @@ def validar_acceso(nombre_pagina: str):
         st.stop()
 
     perfil = usuario.get("perfil")
-    puesto = usuario.get("puesto")  # asumimos que existe en sesión
+    puesto = usuario.get("puesto")   # puede ser None
     nombre = usuario.get("nombre") or usuario.get("usuario")
 
     if perfil is None:
