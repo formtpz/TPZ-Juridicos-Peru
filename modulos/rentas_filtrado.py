@@ -1,233 +1,215 @@
-# modulos/carga_masiva.py
+# modulos/filtro_dinamico.py
 
 import streamlit as st
 import pandas as pd
-from io import StringIO
+import re
 from db import get_connection
-import unicodedata
 
-# ========= FUNCIÓN PARA LIMPIAR NOMBRES DE COLUMNAS =========
-def clean_column_name(col: str) -> str:
+# ============ FUNCIONES DE CARGA CON CACHÉ ============
+@st.cache_data(ttl=3600)  # cache por 1 hora (datos fijos)
+def load_filter_data():
     """
-    Convierte un nombre de columna a snake_case válido en SQL.
-    Ejemplos:
-        "Código Contribuyente" -> "codigo_contribuyente"
-        "Nro. Documento"       -> "nro_documento"
-        "Género"               -> "genero"
+    Carga solo los campos necesarios para los filtros jerárquicos.
     """
-    # 1. Convertir a minúsculas
-    col = col.lower().strip()
-    # 2. Reemplazar tildes (normalizar a ASCII)
-    col = unicodedata.normalize('NFKD', col).encode('ascii', 'ignore').decode('ascii')
-    # 3. Reemplazar espacios, puntos y otros caracteres especiales por '_'
-    col = col.replace(' ', '_').replace('.', '_').replace('-', '_')
-    # 4. Eliminar cualquier carácter que no sea alfanumérico o '_'
-    col = ''.join(c for c in col if c.isalnum() or c == '_')
-    # 5. Evitar guiones bajos múltiples
-    while '__' in col:
-        col = col.replace('__', '_')
-    return col
+    conn = get_connection()
+    query = """
+        SELECT codigo_contribuyente, manzana, lote, cod_hu 
+        FROM public.rentas_vs_predio_urbano
+    """
+    df = pd.read_sql(query, conn)
+    conn.close()
+    return df
 
-# ========= FUNCIÓN PRINCIPAL DE CARGA CON COPY =========
-def cargar_csv_con_copy(tabla_name, archivo_csv, truncar=False, chunksize=10000):
+@st.cache_data(ttl=3600)
+def load_full_tables():
     """
-    Carga un archivo CSV usando COPY de PostgreSQL con chunks y barra de progreso.
+    Carga las tres tablas completas.
     """
-    try:
-        # 1. Leer el header para obtener los nombres originales
-        try:
-            df_sample = pd.read_csv(archivo_csv, delimiter=';', encoding='utf-8', nrows=0, dtype=str)
-        except UnicodeDecodeError:
-            archivo_csv.seek(0)
-            df_sample = pd.read_csv(archivo_csv, delimiter=';', encoding='latin-1', nrows=0, dtype=str)
+    conn = get_connection()
+    contrib = pd.read_sql("SELECT * FROM public.rentas_vs_contribuyente", conn)
+    construc = pd.read_sql("SELECT * FROM public.rentas_vs_construcciones", conn)
+    predios = pd.read_sql("SELECT * FROM public.rentas_vs_predio_urbano", conn)
+    conn.close()
+    return contrib, construc, predios
 
-        # Limpiar nombres de columnas
-        columnas_originales = df_sample.columns.tolist()
-        columnas_limpias = [clean_column_name(col) for col in columnas_originales]
-        
-        # 2. Conectar a la BD
-        conn = get_connection()
-        cur = conn.cursor()
-        
-        # 3. Truncar si se solicita
-        if truncar:
-            cur.execute(f"TRUNCATE TABLE {tabla_name} RESTART IDENTITY CASCADE;")
-            conn.commit()
-            st.info(f"🗑️ Tabla {tabla_name} truncada.")
-        
-        # 4. Leer el CSV en chunks
-        archivo_csv.seek(0)
-        try:
-            chunk_iter = pd.read_csv(
-                archivo_csv, 
-                delimiter=';', 
-                encoding='utf-8', 
-                chunksize=chunksize, 
-                dtype=str,
-                quotechar='"'
-            )
-        except UnicodeDecodeError:
-            archivo_csv.seek(0)
-            chunk_iter = pd.read_csv(
-                archivo_csv, 
-                delimiter=';', 
-                encoding='latin-1', 
-                chunksize=chunksize, 
-                dtype=str,
-                quotechar='"'
-            )
-        
-        # 5. Procesar cada chunk
-        total_filas = 0
-        chunk_count = 0
-        
-        progress_bar = st.progress(0, text="Iniciando carga...")
-        status_text = st.empty()
-        
-        for chunk in chunk_iter:
-            # Asignar nombres limpios a las columnas
-            chunk.columns = columnas_limpias
-            
-            # Reemplazar NaN por None (NULL en BD)
-            chunk = chunk.where(pd.notnull(chunk), None)
-            
-            # Escribir chunk a un buffer CSV en memoria (formato COPY)
-            buffer = StringIO()
-            chunk.to_csv(
-                buffer, 
-                sep=';', 
-                index=False, 
-                header=False, 
-                quoting=1,          # QUOTE_ALL para manejar comillas internas
-                quotechar='"',
-                escapechar='\\',
-                na_rep=''           # valores nulos se escriben como cadena vacía
-            )
-            buffer.seek(0)
-            
-            # Construir comando COPY
-            columnas_str = ', '.join(columnas_limpias)
-            copy_sql = f"""
-                COPY {tabla_name} ({columnas_str}) 
-                FROM STDIN WITH (FORMAT CSV, DELIMITER ';', QUOTE '"', ESCAPE '\\', NULL '')
-            """
-            
-            # Ejecutar COPY
-            cur.copy_expert(sql=copy_sql, file=buffer)
-            conn.commit()
-            
-            # Actualizar estadísticas
-            filas_chunk = len(chunk)
-            total_filas += filas_chunk
-            chunk_count += 1
-            
-            # Actualizar barra de progreso (estimada basada en 100 chunks máx)
-            progress = min(0.99, chunk_count / 100)
-            progress_bar.progress(progress, text=f"Chunk {chunk_count} - {total_filas} filas cargadas")
-            status_text.text(f"✅ Cargadas {total_filas} filas hasta ahora...")
-        
-        # Finalizar
-        progress_bar.progress(1.0, text="¡Carga completada!")
-        status_text.text(f"✅ Total de {total_filas} filas insertadas en {tabla_name}.")
-        
-        cur.close()
-        conn.close()
-        
-        return True, f"✅ {total_filas} registros insertados en {tabla_name} usando COPY.", total_filas
-    
-    except Exception as e:
-        return False, f"❌ Error: {str(e)}", 0
+# ============ FUNCIONES DE NORMALIZACIÓN ============
+def normalize_string(s):
+    """
+    Normaliza una cadena: minúsculas, elimina espacios, signos de puntuación y apóstrofes.
+    """
+    if pd.isna(s):
+        return ''
+    s = str(s)
+    # Eliminar todo excepto letras y números (elimina espacios, puntos, comas, apóstrofes, etc.)
+    s = re.sub(r'[^a-zA-Z0-9]', '', s)
+    return s.lower()
 
-# ========= RENDER DE LA INTERFAZ STREAMLIT =========
+def get_normalized_manzanas(df, cod_hu_selected):
+    """
+    Dado un cod_hu (o lista), devuelve un diccionario {normalizado: valor_original}
+    de todas las manzanas que existen para ese cod_hu.
+    """
+    if not cod_hu_selected:
+        return {}
+    mask = df['cod_hu'].isin(cod_hu_selected)
+    manzanas = df.loc[mask, 'manzana'].dropna().unique()
+    result = {}
+    for mz in manzanas:
+        norm = normalize_string(mz)
+        # Si hay duplicados normalizados, conservamos el primero (o podríamos mostrar todos)
+        if norm not in result:
+            result[norm] = mz
+    return result
+
+# ============ FUNCIÓN PRINCIPAL DE RENDER ============
 def render():
-    # Si usas autenticación, descomenta:
-    # from permisos import validar_acceso
-    # validar_acceso("Carga Masiva de Catastro")
+    st.title("🔍 Filtro Dinámico de Catastro")
+    st.markdown("Selecciona `Código HU`, `Manzana` y `Lote` para filtrar los contribuyentes.")
 
-    st.title("📤 Carga Masiva de Archivos CSV a PostgreSQL")
-    st.markdown("Sube los tres archivos correspondientes a las tablas del sistema.")
-    st.caption("Los nombres de columna se limpiarán automáticamente (tildes, puntos, espacios).")
+    # --- Cargar datos con caché ---
+    with st.spinner("Cargando datos..."):
+        df_filtros = load_filter_data()
+        df_contrib, df_construc, df_predios = load_full_tables()
 
-    tablas = {
-        "rentas_vs_contribuyente": {
-            "label": "📄 Tabla 1: Contribuyentes",
-            "help": "Archivo CSV con distrito, código contribuyente, apellidos, etc."
-        },
-        "rentas_vs_construcciones": {
-            "label": "🏗️ Tabla 2: Construcciones",
-            "help": "Archivo CSV con datos de construcciones por nivel."
-        },
-        "rentas_vs_predio_urbano": {
-            "label": "🏠 Tabla 3: Predios Urbanos",
-            "help": "Archivo CSV con datos completos de predios urbanos."
-        }
-    }
+    # --- Filtros jerárquicos ---
+    # 1. Obtener listas únicas (ordenadas)
+    cod_hu_opciones = sorted(df_filtros['cod_hu'].dropna().unique())
+    manzana_opciones = sorted(df_filtros['manzana'].dropna().unique())
+    lote_opciones = sorted(df_filtros['lote'].dropna().unique())
 
-    truncar_global = st.checkbox("🗑️ Truncar (eliminar datos existentes) antes de cargar", value=False)
-    st.divider()
+    # Estado de selecciones
+    selected_cod_hu = st.multiselect(
+        "Código de Habilitación Urbana (cod_hu)",
+        options=cod_hu_opciones,
+        default=[],
+        help="Selecciona uno o varios códigos HU"
+    )
 
-    # Uploaders individuales
-    for tabla, config in tablas.items():
-        with st.container():
-            col1, col2 = st.columns([3, 1])
-            with col1:
-                archivo = st.file_uploader(
-                    config["label"],
-                    type=["csv"],
-                    accept_multiple_files=False,
-                    key=f"upload_{tabla}",
-                    help=config["help"]
-                )
-            with col2:
-                if archivo is not None:
-                    st.caption(f"Tamaño: {archivo.size / 1024:.1f} KB")
-
-            if archivo is not None:
-                if st.button(f"⬆️ Cargar {tabla}", key=f"btn_{tabla}"):
-                    with st.spinner(f"Cargando {tabla}... Esto puede tomar unos segundos."):
-                        ok, mensaje, filas = cargar_csv_con_copy(tabla, archivo, truncar=truncar_global)
-                        if ok:
-                            st.success(mensaje)
-                            st.balloons()
-                        else:
-                            st.error(mensaje)
-            else:
-                st.info("📂 Sube un archivo CSV para cargar.")
-
-            st.divider()
-
-    # Carga simultánea
-    st.subheader("⚡ Carga simultánea")
-    archivos_subidos = [st.session_state.get(f"upload_{tabla}") for tabla in tablas.keys()]
-    if all(archivos_subidos):
-        if st.button("🚀 Cargar todos los archivos", type="primary"):
-            progreso = st.progress(0, text="Iniciando...")
-            exito_total = True
-            resultados = []
-            for i, (tabla, archivo) in enumerate(zip(tablas.keys(), archivos_subidos)):
-                progreso.progress((i + 1) / len(tablas), text=f"Cargando {tabla}...")
-                ok, mensaje, _ = cargar_csv_con_copy(tabla, archivo, truncar=truncar_global)
-                resultados.append(f"{tabla}: {'✅' if ok else '❌'} {mensaje}")
-                if not ok:
-                    exito_total = False
-            progreso.empty()
-            for res in resultados:
-                if "✅" in res:
-                    st.success(res)
-                else:
-                    st.error(res)
-            if exito_total:
-                st.balloons()
+    # Filtrar manzanas según cod_hu seleccionado
+    if selected_cod_hu:
+        manzanas_filtradas = sorted(
+            df_filtros[df_filtros['cod_hu'].isin(selected_cod_hu)]['manzana'].dropna().unique()
+        )
     else:
-        st.info("Sube los tres archivos para usar la carga simultánea.")
+        manzanas_filtradas = manzana_opciones
 
-    # Consultar conteo de registros
-    if st.button("🔍 Ver cantidad de registros en cada tabla"):
-        conn = get_connection()
-        cur = conn.cursor()
-        for tabla in tablas.keys():
-            cur.execute(f"SELECT COUNT(*) FROM {tabla}")
-            count = cur.fetchone()[0]
-            st.write(f"**{tabla}**: {count} registros")
-        cur.close()
-        conn.close()
+    selected_manzana = st.multiselect(
+        "Manzana",
+        options=manzanas_filtradas,
+        default=[],
+        help="Selecciona una o varias manzanas"
+    )
+
+    # Filtrar lotes según cod_hu y manzana seleccionados
+    mask_lotes = pd.Series(True, index=df_filtros.index)
+    if selected_cod_hu:
+        mask_lotes &= df_filtros['cod_hu'].isin(selected_cod_hu)
+    if selected_manzana:
+        mask_lotes &= df_filtros['manzana'].isin(selected_manzana)
+    lotes_filtrados = sorted(df_filtros[mask_lotes]['lote'].dropna().unique()) if mask_lotes.any() else []
+
+    selected_lote = st.multiselect(
+        "Lote",
+        options=lotes_filtrados,
+        default=[],
+        help="Selecciona uno o varios lotes"
+    )
+
+    # --- Aplicar filtros jerárquicos para obtener los contribuyentes candidatos ---
+    mask_filtros = pd.Series(True, index=df_filtros.index)
+    if selected_cod_hu:
+        mask_filtros &= df_filtros['cod_hu'].isin(selected_cod_hu)
+    if selected_manzana:
+        mask_filtros &= df_filtros['manzana'].isin(selected_manzana)
+    if selected_lote:
+        mask_filtros &= df_filtros['lote'].isin(selected_lote)
+
+    df_filtrado_ubicacion = df_filtros[mask_filtros]
+    contribuyentes_candidatos = sorted(df_filtrado_ubicacion['codigo_contribuyente'].dropna().unique())
+
+    # --- Mostrar nota informativa sobre otras manzanas (si hay cod_hu y manzana seleccionados) ---
+    if selected_cod_hu and selected_manzana:
+        # Obtener todas las manzanas para ese cod_hu
+        manzanas_dict = get_normalized_manzanas(df_filtros, selected_cod_hu)
+        # Normalizar las manzanas seleccionadas
+        selected_norm = [normalize_string(m) for m in selected_manzana]
+        # Otras manzanas (normalizadas) que no están en las seleccionadas
+        otras_norm = [n for n in manzanas_dict.keys() if n not in selected_norm]
+        if otras_norm:
+            # Mostrar los valores originales
+            otras_originales = [manzanas_dict[n] for n in otras_norm]
+            st.info(f"📌 El código HU **{', '.join(selected_cod_hu)}** también existe para las manzanas: **{', '.join(otras_originales)}**.")
+        else:
+            st.success("✅ Las manzanas seleccionadas cubren todas las existentes para ese código HU.")
+
+    # --- Tabla resumen de contribuyentes ---
+    st.subheader("📋 Contribuyentes encontrados")
+    if not df_filtrado_ubicacion.empty:
+        # Mostrar tabla resumen
+        tabla_resumen = df_filtrado_ubicacion[['codigo_contribuyente', 'manzana', 'lote', 'cod_hu']].drop_duplicates()
+        st.dataframe(tabla_resumen, use_container_width=True)
+
+        # Selección de contribuyentes
+        st.markdown("### Selecciona los contribuyentes para visualizar sus datos completos")
+
+        # Opción 1: Multiselect (con búsqueda)
+        selected_contrib_multiselect = st.multiselect(
+            "Selecciona contribuyentes (puedes buscar por código)",
+            options=contribuyentes_candidatos,
+            default=[],
+            help="Escribe el código para buscar"
+        )
+
+        # Opción 2: Ingreso manual
+        st.markdown("o ingresa códigos manualmente (separados por comas o espacios):")
+        manual_input = st.text_area(
+            "Códigos manuales",
+            placeholder="Ej: 10016367, 10016366, 10016365",
+            help="Escribe los códigos separados por comas o espacios."
+        )
+
+        # Unir ambas selecciones
+        contribuyentes_seleccionados = set(selected_contrib_multiselect)
+        if manual_input.strip():
+            # Parsear: separar por comas o espacios y limpiar
+            import re
+            codigos_manual = re.split(r'[,\s]+', manual_input.strip())
+            codigos_manual = [c for c in codigos_manual if c.isdigit()]  # solo números
+            contribuyentes_seleccionados.update(codigos_manual)
+
+        contribuyentes_seleccionados = list(contribuyentes_seleccionados)
+
+        if st.button("🔎 Mostrar datos completos", type="primary"):
+            if not contribuyentes_seleccionados:
+                st.warning("No has seleccionado ningún contribuyente.")
+            else:
+                # Filtrar las tres tablas
+                mask_contrib = df_contrib['codigo_contribuyente'].isin(contribuyentes_seleccionados)
+                df_contrib_filt = df_contrib[mask_contrib]
+
+                mask_construc = df_construc['codigo_contribuyente'].isin(contribuyentes_seleccionados)
+                df_construc_filt = df_construc[mask_construc]
+
+                mask_predios = df_predios['codigo_contribuyente'].isin(contribuyentes_seleccionados)
+                df_predios_filt = df_predios[mask_predios]
+
+                # Mostrar resultados
+                st.success(f"Mostrando datos para {len(contribuyentes_seleccionados)} contribuyente(s).")
+
+                with st.expander("📄 Contribuyentes", expanded=True):
+                    st.dataframe(df_contrib_filt, use_container_width=True)
+
+                with st.expander("🏗️ Construcciones", expanded=True):
+                    st.dataframe(df_construc_filt, use_container_width=True)
+
+                with st.expander("🏠 Predios Urbanos", expanded=True):
+                    st.dataframe(df_predios_filt, use_container_width=True)
+
+                # Opción de descarga (opcional)
+                # st.download_button(...)
+    else:
+        st.warning("No se encontraron contribuyentes con los filtros seleccionados.")
+
+    # --- Pie de página: estadísticas ---
+    st.divider()
+    st.caption(f"Total de contribuyentes en la base: {len(df_contrib)} | Predios: {len(df_predios)} | Construcciones: {len(df_construc)}")
