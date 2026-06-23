@@ -65,13 +65,11 @@ def render():
     with col2:
         # Lista de motivos (incluyendo los existentes y el nuevo "Horas Compensadas")
         motivos = (
-            "Reposición de tiempo", "Cita CCSS", "Entregas", "Incapacidad",
+            "Horas Extras","Horas Compensadas","Reposición de tiempo", "Cita CCSS", "Entregas", "Incapacidad",
             "Control de Calidad Masivos", "Fallos en Aplicativo o Conexión",
-            "Horas Extras",
             "Licencia por Fallecimiento de Familiar", "Licencia por Maternidad, Paternidad o Lactancia",
             "Reunión", "Supervisión", "Vacaciones", "Horas Extra Apoyo Otros Proyectos",
-            "Horas Ordinarias Apoyo a Otros Proyectos",
-            "Horas Compensadas",   # <--- NUEVO MOTIVO
+            "Horas Ordinarias Apoyo a Otros Proyectos",            
             "Otros"
         )
         motivo_seleccionado = st.selectbox("Motivo", options=motivos)
