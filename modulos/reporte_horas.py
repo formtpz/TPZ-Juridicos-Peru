@@ -5,7 +5,7 @@ from datetime import datetime
 import pytz
 
 # Usamos db_core para todas las consultas (optimizado con caché y reconexión)
-from db_core import fetch_df, fetch_one, execute
+from db import fetch_df, fetch_one, execute
 
 # Zona horaria Guatemala
 TZ = pytz.timezone('America/Guatemala')
