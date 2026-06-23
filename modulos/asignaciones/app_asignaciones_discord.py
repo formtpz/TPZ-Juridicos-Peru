@@ -6,6 +6,7 @@ import io
 
 import pandas as pd
 import streamlit as st
+from streamlit.runtime.uploaded_file_manager import UploadedFile
 
 from modulos.asignaciones import discord_notifier, storage
 
@@ -14,7 +15,7 @@ st.title("🏘️ Asignaciones de Manzanas")
 storage.init_db()
 
 
-def _leer_excel(archivo) -> pd.DataFrame:
+def _leer_excel(archivo: UploadedFile) -> pd.DataFrame:
     nombre = archivo.name.lower()
     raw = archivo.read()
     if nombre.endswith(".xlsb"):
