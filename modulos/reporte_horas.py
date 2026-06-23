@@ -129,7 +129,7 @@ def render():
     # Suma de Horas Extras con fecha >= FECHA_BASE_COMPENSACION
     df_extras = fetch_df(
         """
-        SELECT COALESCE(SUM(horas), 0) AS total
+        SELECT COALESCE(SUM(horas::decimal), 0) AS total
         FROM otros_registros
         WHERE nombre = %s
           AND motivo = 'Horas Extras'
@@ -142,7 +142,7 @@ def render():
     # Suma de Horas Compensadas con fecha >= FECHA_BASE_COMPENSACION
     df_compensadas = fetch_df(
         """
-        SELECT COALESCE(SUM(horas), 0) AS total
+        SELECT COALESCE(SUM(horas::decimal), 0) AS total
         FROM otros_registros
         WHERE nombre = %s
           AND motivo = 'Horas Compensadas'
