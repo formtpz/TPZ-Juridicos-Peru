@@ -19,7 +19,7 @@ def _now_iso() -> str:
 
 def _connect() -> sqlite3.Connection:
     REPO_DIR.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_FILE, timeout=30, isolation_level=None)
+    conn = sqlite3.connect(DB_FILE, timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON;")
     return conn
@@ -104,7 +104,7 @@ def registrar_desde_dataframe(df) -> dict:
     now = _now_iso()
 
     with _connect() as conn:
-        conn.execute("BEGIN IMMEDIATE;")
+        conn.execute("BEGIN IMMEDIATE")
         try:
             for poligono, manzana in sorted(manzanas_set):
                 cur = conn.execute(
@@ -209,7 +209,7 @@ def asignar_manzana(poligono: str, manzana: str, operador: str, supervisor: str)
     now = _now_iso()
 
     with _connect() as conn:
-        conn.execute("BEGIN IMMEDIATE;")
+        conn.execute("BEGIN IMMEDIATE")
         try:
             activa = conn.execute(
                 """
@@ -284,7 +284,7 @@ def cerrar_manzana(poligono: str, manzana: str, operador: str, estado_final: str
 
     now = _now_iso()
     with _connect() as conn:
-        conn.execute("BEGIN IMMEDIATE;")
+        conn.execute("BEGIN IMMEDIATE")
         try:
             row = conn.execute(
                 "SELECT * FROM manzanas WHERE poligono = ? AND manzana = ?",

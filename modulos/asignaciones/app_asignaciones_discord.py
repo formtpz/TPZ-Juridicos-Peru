@@ -124,10 +124,14 @@ with col_asig:
 
 with col_cierre:
     st.subheader("Cerrar manzana")
-    en_proceso_df = df_estado[
-        (df_estado["Estado"] == "En proceso")
-        & (df_estado["Operador"].str.strip().str.lower() == operador.strip().lower())
-    ] if operador.strip() else pd.DataFrame()
+    operador_limpio = operador.strip().lower()
+    if operador_limpio:
+        en_proceso_df = df_estado[
+            (df_estado["Estado"] == "En proceso")
+            & (df_estado["Operador"].str.strip().str.lower() == operador_limpio)
+        ]
+    else:
+        en_proceso_df = pd.DataFrame()
     opciones_cierre = [f"{r['Poligono']} | {r['Manzana']}" for _, r in en_proceso_df.iterrows()]
     manzana_cierre = st.selectbox(
         "Manzanas activas del operario",
@@ -179,11 +183,16 @@ else:
     )
 
     f1, f2, f3 = st.columns(3)
-    poligonos_sel = f1.multiselect("Filtrar polígono", options=poligonos, default=poligonos)
+    poligonos_sel = f1.multiselect("Filtrar polígono", options=poligonos)
     estados_sel = f2.multiselect("Filtrar estado", options=storage.ESTADOS, default=storage.ESTADOS)
     operadores_sel = f3.multiselect("Filtrar operario", options=operadores)
 
-    df_f = df_estado[df_estado["Poligono"].isin(poligonos_sel) & df_estado["Estado"].isin(estados_sel)]
+    if poligonos_sel:
+        filtro_poligonos = df_estado["Poligono"].isin(poligonos_sel)
+    else:
+        filtro_poligonos = df_estado["Poligono"].notna()
+
+    df_f = df_estado[filtro_poligonos & df_estado["Estado"].isin(estados_sel)]
     if operadores_sel:
         df_f = df_f[df_f["Operador"].isin(operadores_sel)]
 

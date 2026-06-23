@@ -91,7 +91,7 @@ Transiciones **no** permitidas por la lógica actual:
 
 ## 8) Checklist de pruebas operativas
 
-- [ ] Cargar Excel con columnas `Poligono`, `Manzana`, `Lote`.
+- [ ] Cargar Excel con columnas `Poligono` (polígono), `Manzana`, `Lote`.
 - [ ] Verificar que se inserten nuevas manzanas y lotes, sin duplicados.
 - [ ] Asignar una manzana disponible y validar estado `En proceso`.
 - [ ] Confirmar notificación Discord al asignar.
