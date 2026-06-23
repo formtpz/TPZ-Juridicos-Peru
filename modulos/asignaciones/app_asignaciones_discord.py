@@ -1,9 +1,6 @@
-"""
-App Streamlit para asignación de manzanas con notificaciones Discord.
+"""App Streamlit para asignaciones por manzana con SQLite y Discord."""
 
-Ejecutar:
-    streamlit run modulos/asignaciones/app_asignaciones_discord.py
-"""
+from __future__ import annotations
 
 import io
 
@@ -13,161 +10,219 @@ import streamlit as st
 from modulos.asignaciones import discord_notifier, storage
 
 st.set_page_config(page_title="Asignaciones de Manzanas", page_icon="🏘️", layout="wide")
-st.title("🏘️ Asignaciones de Manzanas — Piloto Discord")
+st.title("🏘️ Asignaciones de Manzanas")
+storage.init_db()
 
-# ---------------------------------------------------------------------------
-# Sidebar: datos del operador / supervisor
-# ---------------------------------------------------------------------------
-with st.sidebar:
-    st.header("👤 Datos del operador")
-    operador = st.text_input("Operador", placeholder="Nombre del operador")
-    supervisor = st.text_input("Supervisor", placeholder="Nombre del supervisor")
-    st.divider()
-    st.caption("Las notificaciones Discord se envían automáticamente al asignar o cerrar manzanas.")
 
-# ---------------------------------------------------------------------------
-# Sección 1: Carga de Excel
-# ---------------------------------------------------------------------------
-st.header("1. Cargar Excel con manzanas")
-
-archivo = st.file_uploader(
-    "Selecciona un archivo Excel (.xlsx o .xlsb)",
-    type=["xlsx", "xlsb"],
-)
-
-if archivo is not None:
-    nombre = archivo.name
+def _leer_excel(archivo) -> pd.DataFrame:
+    nombre = archivo.name.lower()
     raw = archivo.read()
+    if nombre.endswith(".xlsb"):
+        return pd.read_excel(io.BytesIO(raw), engine="pyxlsb")
+    return pd.read_excel(io.BytesIO(raw), engine="openpyxl")
+
+
+def _to_df() -> pd.DataFrame:
+    data = storage.get_all()
+    if not data:
+        return pd.DataFrame(
+            columns=[
+                "Poligono",
+                "Manzana",
+                "Estado",
+                "Operador",
+                "Supervisor",
+                "Fecha Asignacion",
+                "Fecha Cierre",
+                "Total Lotes",
+            ]
+        )
+    return pd.DataFrame(
+        [
+            {
+                "Poligono": r["poligono"],
+                "Manzana": r["manzana"],
+                "Estado": r["estado"],
+                "Operador": r["operador_activo"] or "—",
+                "Supervisor": r["supervisor_activo"] or "—",
+                "Fecha Asignacion": r["fecha_asignacion_activa"] or "—",
+                "Fecha Cierre": r["fecha_cierre_activa"] or "—",
+                "Total Lotes": r["total_lotes"],
+            }
+            for r in data
+        ]
+    )
+
+
+st.header("1) Carga de Excel (Poligono / Manzana / Lote)")
+archivo = st.file_uploader("Sube archivo .xlsx o .xlsb", type=["xlsx", "xlsb"])
+if archivo is not None:
     try:
-        if nombre.endswith(".xlsb"):
-            df = pd.read_excel(io.BytesIO(raw), engine="pyxlsb")
-        else:
-            df = pd.read_excel(io.BytesIO(raw), engine="openpyxl")
-
-        st.success(f"Archivo cargado: {nombre} — {len(df)} filas, {len(df.columns)} columnas.")
-        st.dataframe(df.head(10), use_container_width=True)
-
-        col_manzana = None
-        for c in df.columns:
-            if "manzana" in str(c).lower():
-                col_manzana = c
-                break
-
-        if col_manzana is None:
-            col_manzana = st.selectbox(
-                "No se detectó columna 'manzana'. Selecciona la columna correcta:",
-                options=list(df.columns),
+        df_excel = _leer_excel(archivo)
+        st.success(
+            f"Archivo cargado: {archivo.name} — {len(df_excel)} filas y {len(df_excel.columns)} columnas."
+        )
+        st.dataframe(df_excel.head(20), use_container_width=True)
+        if st.button("📥 Registrar / actualizar en base SQLite", use_container_width=True):
+            resumen = storage.registrar_desde_dataframe(df_excel)
+            st.success(
+                "Carga completada. "
+                f"Manzanas detectadas: {resumen['manzanas_detectadas']}, "
+                f"manzanas nuevas: {resumen['manzanas_insertadas']}, "
+                f"lotes detectados: {resumen['lotes_detectados']}, "
+                f"lotes nuevos: {resumen['lotes_insertados']}."
             )
+            st.rerun()
+    except Exception as exc:
+        st.error(f"No se pudo procesar el Excel: {exc}")
 
-        if col_manzana:
-            manzanas_raw = df[col_manzana].dropna().astype(str).str.strip().unique().tolist()
-            manzanas_raw = [m for m in manzanas_raw if m]
-            st.info(f"Manzanas detectadas: **{len(manzanas_raw)}**")
-            st.write(manzanas_raw[:20])
 
-            if st.button("📥 Registrar manzanas en el sistema"):
-                storage.registrar_manzanas(manzanas_raw)
-                st.success(f"{len(manzanas_raw)} manzanas registradas (las nuevas en estado 'Sin asignar').")
-
-    except Exception as e:
-        if "codec" in str(e).lower() or "decode" in str(e).lower():
-            st.error("Error al leer el archivo: formato no compatible o archivo corrupto.")
-        elif "No such file" in str(e):
-            st.error("Error: no se encontró el archivo.")
-        else:
-            st.error(f"Error al procesar el archivo Excel: {e}")
-
-# ---------------------------------------------------------------------------
-# Sección 2: Asignar manzana
-# ---------------------------------------------------------------------------
 st.divider()
-st.header("2. Asignar manzana")
+st.header("2) Operarios (asignar / cerrar)")
 
-data = storage.get_all()
-manzanas_sin_asignar = [m for m, r in data.items() if r["estado"] == "Sin asignar"]
+col_op, col_sup = st.columns(2)
+operador = col_op.text_input("Operario", placeholder="Nombre del operario")
+supervisor = col_sup.text_input("Supervisor", placeholder="Nombre del supervisor")
 
-if not manzanas_sin_asignar:
-    st.info("No hay manzanas disponibles para asignar. Carga un Excel y regístralas primero.")
-else:
-    manzana_sel = st.selectbox("Selecciona manzana a asignar:", manzanas_sin_asignar)
+df_estado = _to_df()
 
-    if st.button("✅ Asignar manzana"):
-        if not operador.strip():
-            st.warning("Ingresa el nombre del operador en el panel lateral.")
-        elif not supervisor.strip():
-            st.warning("Ingresa el nombre del supervisor en el panel lateral.")
+col_asig, col_cierre = st.columns(2)
+with col_asig:
+    st.subheader("Asignar manzana")
+    disponibles_df = df_estado[df_estado["Estado"] == "Sin asignar"]
+    opciones_asignar = [
+        f"{r['Poligono']} | {r['Manzana']}" for _, r in disponibles_df.iterrows()
+    ]
+    manzana_asignar = st.selectbox(
+        "Manzanas disponibles",
+        options=opciones_asignar,
+        index=None,
+        placeholder="Selecciona polígono/manzana",
+        key="sel_asignar",
+    )
+    if st.button("✅ Asignar", use_container_width=True):
+        if not operador.strip() or not supervisor.strip():
+            st.warning("Debes ingresar operario y supervisor.")
+        elif not manzana_asignar:
+            st.warning("Selecciona una manzana disponible.")
         else:
-            ok, msg = storage.asignar_manzana(manzana_sel, operador.strip(), supervisor.strip())
+            poligono, manzana = [x.strip() for x in manzana_asignar.split("|", maxsplit=1)]
+            ok, msg = storage.asignar_manzana(poligono, manzana, operador.strip(), supervisor.strip())
             if ok:
                 notif_ok = discord_notifier.notify_asignacion(
-                    operador.strip(), supervisor.strip(), manzana_sel
+                    operador.strip(), supervisor.strip(), f"{poligono}-{manzana}"
                 )
                 st.success(msg)
-                if notif_ok:
-                    st.caption("📨 Notificación Discord enviada.")
-                else:
-                    st.caption("⚠️ No se pudo enviar la notificación Discord (revisa DISCORD_WEBHOOK_URL).")
+                st.caption(
+                    "📨 Notificación Discord enviada."
+                    if notif_ok
+                    else "⚠️ No se pudo enviar la notificación Discord."
+                )
+                st.rerun()
             else:
                 st.error(msg)
 
-# ---------------------------------------------------------------------------
-# Sección 3: Cerrar manzana (→ Pendiente QC)
-# ---------------------------------------------------------------------------
-st.divider()
-st.header("3. Cerrar manzana → Pendiente QC")
-
-data = storage.get_all()
-manzanas_asignadas = [m for m, r in data.items() if r["estado"] == "Asignada"]
-
-if not manzanas_asignadas:
-    st.info("No hay manzanas en estado 'Asignada' para cerrar.")
-else:
-    manzana_cierre = st.selectbox("Selecciona manzana a cerrar:", manzanas_asignadas)
-
-    if st.button("🔒 Cerrar manzana"):
-        registro = storage.get_manzana(manzana_cierre)
-        ok, msg = storage.cerrar_manzana(manzana_cierre)
-        if ok:
-            notif_ok = discord_notifier.notify_cierre(
-                registro.get("operador", ""), registro.get("supervisor", ""), manzana_cierre
-            )
-            st.success(msg)
-            if notif_ok:
-                st.caption("📨 Notificación Discord enviada.")
-            else:
-                st.caption("⚠️ No se pudo enviar la notificación Discord (revisa DISCORD_WEBHOOK_URL).")
-        else:
-            st.error(msg)
-
-# ---------------------------------------------------------------------------
-# Sección 4: Tabla resumen
-# ---------------------------------------------------------------------------
-st.divider()
-st.header("4. Resumen de asignaciones")
-
-data = storage.get_all()
-if not data:
-    st.info("Aún no hay manzanas registradas.")
-else:
-    rows = []
-    for manzana, r in data.items():
-        rows.append(
-            {
-                "Manzana": manzana,
-                "Estado": r["estado"],
-                "Operador": r["operador"] or "—",
-                "Supervisor": r["supervisor"] or "—",
-                "Fecha Asignación": r["fecha_asignacion"] or "—",
-                "Fecha Cierre": r["fecha_cierre"] or "—",
-            }
-        )
-    df_resumen = pd.DataFrame(rows)
-
-    estado_filtro = st.multiselect(
-        "Filtrar por estado:",
-        options=storage.ESTADOS,
-        default=storage.ESTADOS,
+with col_cierre:
+    st.subheader("Cerrar manzana")
+    en_proceso_df = df_estado[
+        (df_estado["Estado"] == "En proceso")
+        & (df_estado["Operador"].str.strip().str.lower() == operador.strip().lower())
+    ] if operador.strip() else pd.DataFrame()
+    opciones_cierre = [f"{r['Poligono']} | {r['Manzana']}" for _, r in en_proceso_df.iterrows()]
+    manzana_cierre = st.selectbox(
+        "Manzanas activas del operario",
+        options=opciones_cierre,
+        index=None,
+        placeholder="Selecciona manzana a cerrar",
+        key="sel_cierre",
     )
-    df_filtrado = df_resumen[df_resumen["Estado"].isin(estado_filtro)]
-    st.dataframe(df_filtrado, use_container_width=True)
-    st.caption(f"Total: {len(df_filtrado)} manzanas")
+    estado_final = st.radio("Estado final", options=storage.ESTADOS_CIERRE, horizontal=True)
+    if st.button("🔒 Cerrar", use_container_width=True):
+        if not operador.strip():
+            st.warning("Debes ingresar operario.")
+        elif not manzana_cierre:
+            st.warning("No hay manzana activa seleccionada para cierre.")
+        else:
+            poligono, manzana = [x.strip() for x in manzana_cierre.split("|", maxsplit=1)]
+            supervisor_actual = "—"
+            match = df_estado[
+                (df_estado["Poligono"] == poligono) & (df_estado["Manzana"] == manzana)
+            ]
+            if not match.empty:
+                supervisor_actual = match.iloc[0]["Supervisor"]
+            ok, msg = storage.cerrar_manzana(poligono, manzana, operador.strip(), estado_final)
+            if ok:
+                notif_ok = discord_notifier.notify_cierre(
+                    operador.strip(), supervisor_actual, f"{poligono}-{manzana}", estado_final
+                )
+                st.success(msg)
+                st.caption(
+                    "📨 Notificación Discord enviada."
+                    if notif_ok
+                    else "⚠️ No se pudo enviar la notificación Discord."
+                )
+                st.rerun()
+            else:
+                st.error(msg)
+
+
+st.divider()
+st.header("3) Supervisión (vista colaborativa)")
+
+df_estado = _to_df()
+if df_estado.empty:
+    st.info("Aún no hay manzanas cargadas.")
+else:
+    poligonos = sorted(df_estado["Poligono"].astype(str).unique().tolist())
+    operadores = sorted(
+        [o for o in df_estado["Operador"].astype(str).unique().tolist() if o != "—"]
+    )
+
+    f1, f2, f3 = st.columns(3)
+    poligonos_sel = f1.multiselect("Filtrar polígono", options=poligonos, default=poligonos)
+    estados_sel = f2.multiselect("Filtrar estado", options=storage.ESTADOS, default=storage.ESTADOS)
+    operadores_sel = f3.multiselect("Filtrar operario", options=operadores)
+
+    df_f = df_estado[df_estado["Poligono"].isin(poligonos_sel) & df_estado["Estado"].isin(estados_sel)]
+    if operadores_sel:
+        df_f = df_f[df_f["Operador"].isin(operadores_sel)]
+
+    total = len(df_f)
+    en_proceso = int((df_f["Estado"] == "En proceso").sum())
+    finalizadas = int((df_f["Estado"] == "Finalizada").sum())
+    conflicto = int((df_f["Estado"] == "En conflicto").sum())
+
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Total manzanas", total)
+    k2.metric("En proceso", en_proceso)
+    k3.metric("Finalizadas", finalizadas)
+    k4.metric("En conflicto", conflicto)
+
+    avance = (
+        df_f.groupby("Poligono", as_index=False)
+        .agg(total_manzanas=("Manzana", "count"), finalizadas=("Estado", lambda s: (s == "Finalizada").sum()))
+    )
+    if not avance.empty:
+        avance["avance_%"] = (avance["finalizadas"] / avance["total_manzanas"] * 100).round(2)
+        st.subheader("Avance por polígono")
+        st.dataframe(avance, use_container_width=True)
+
+    st.subheader("Tabla colaborativa")
+    st.dataframe(df_f.sort_values(["Poligono", "Manzana"]), use_container_width=True)
+
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df_f.sort_values(["Poligono", "Manzana"]).to_excel(
+            writer, sheet_name="estado_actual", index=False
+        )
+        if not avance.empty:
+            avance.to_excel(writer, sheet_name="avance_poligono", index=False)
+    output.seek(0)
+
+    st.download_button(
+        "📤 Exportar excel colaborativo",
+        data=output.getvalue(),
+        file_name="asignaciones_estado_actual.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True,
+    )

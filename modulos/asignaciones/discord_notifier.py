@@ -39,17 +39,20 @@ def notify_asignacion(operador: str, supervisor: str, manzana: str) -> bool:
     return _send(payload)
 
 
-def notify_cierre(operador: str, supervisor: str, manzana: str) -> bool:
-    """Notifica que una manzana fue cerrada y pasa a Pendiente QC."""
+def notify_cierre(
+    operador: str, supervisor: str, manzana: str, estado_final: str = "Finalizada"
+) -> bool:
+    """Notifica que una manzana fue cerrada con estado final."""
     payload = {
         "embeds": [
             {
-                "title": "✅ Manzana Cerrada → Pendiente QC",
+                "title": f"✅ Manzana Cerrada → {estado_final}",
                 "color": 0xF39C12,
                 "fields": [
                     {"name": "Manzana", "value": manzana, "inline": True},
                     {"name": "Operador", "value": operador, "inline": True},
                     {"name": "Supervisor", "value": supervisor, "inline": True},
+                    {"name": "Estado Final", "value": estado_final, "inline": True},
                 ],
             }
         ]
