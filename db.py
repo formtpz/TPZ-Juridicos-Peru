@@ -8,7 +8,6 @@ import logging
 
 logging.basicConfig(level=logging.INFO)
 
-# Obtener URI de secrets
 uri = st.secrets["db_credentials"]["URI"]
 result = urlparse(uri)
 hostname = result.hostname
@@ -17,11 +16,10 @@ username = result.username
 pwd = result.password
 port_id = result.port
 
-# Pool de conexiones (mínimo 1, máximo 10, ajustable)
 @st.cache_resource
 def get_pool():
     return psycopg2.pool.SimpleConnectionPool(
-        1, 10,
+        2, 100,                     # mínimo 2, máximo 100
         host=hostname,
         dbname=database,
         user=username,
@@ -33,7 +31,7 @@ def get_connection():
     """Devuelve una conexión del pool con autocommit activado."""
     pool_obj = get_pool()
     conn = pool_obj.getconn()
-    conn.autocommit = True  # Evita transacciones abortadas
+    conn.autocommit = True
     return conn
 
 def release_connection(conn):
@@ -41,12 +39,8 @@ def release_connection(conn):
     pool_obj = get_pool()
     pool_obj.putconn(conn)
 
-# ============================================================
-# FUNCIONES DE ACCESO A DATOS (misma interfaz que antes)
-# ============================================================
-
+# Funciones de acceso a datos
 def fetch_df(query: str, params=None):
-    """Ejecuta SELECT y devuelve DataFrame."""
     conn = get_connection()
     try:
         return pd.read_sql_query(query, con=conn, params=params)
@@ -54,14 +48,12 @@ def fetch_df(query: str, params=None):
         release_connection(conn)
 
 def fetch_one(query: str, params=None):
-    """Retorna primera fila como diccionario, o None."""
     df = fetch_df(query, params)
     if df.empty:
         return None
     return df.iloc[0].to_dict()
 
 def execute(query: str, params=None):
-    """Ejecuta INSERT/UPDATE/DELETE con commit."""
     conn = get_connection()
     cur = conn.cursor()
     try:
@@ -75,7 +67,4 @@ def execute(query: str, params=None):
         cur.close()
         release_connection(conn)
 
-def get_engine():
-    """Para compatibilidad con código que use SQLAlchemy (opcional)."""
-    from sqlalchemy import create_engine
-    return create_engine(uri)
+# (Opcional) get_engine eliminado para evitar uso externo
