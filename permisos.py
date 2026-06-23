@@ -59,11 +59,12 @@ PERMISOS = {
 
     # ---------- Perfil + puesto + nombre (máxima especificidad) ----------
     "1;Coordinador;Linnette Ceciliano Calderon": [
-        #"Depuración de Datos",
-        #"Reglas",
-        #"Compilar Detalle Errores",
-        #"Filtro de Errores",
-        #"Resultados Calidad",   # opción extra que no tiene el perfil 4 base
+        "Reporte de Horas"
+        "Depuración de Datos",
+        "Reglas",
+        "Compilar Detalle Errores",
+        "Filtro de Errores",
+        "Resultados Calidad",   # opción extra que no tiene el perfil 4 base
         "Cerrar Sesion"
     ],
     "2;Analista;Juan Perez": [
