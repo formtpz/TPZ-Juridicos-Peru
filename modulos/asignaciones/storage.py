@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -25,7 +25,7 @@ def _now_iso() -> str:
 
 def _connect() -> sqlite3.Connection:
     REPO_DIR.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_FILE, timeout=30)
+    conn = sqlite3.connect(DB_FILE, timeout=10)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON;")
     return conn
@@ -86,6 +86,10 @@ def _normalize_columns(df: pd.DataFrame) -> tuple[str, str, str]:
     return col_map["poligono"], col_map["manzana"], col_map["lote"]
 
 
+def _normalize_cell(value: Any) -> str:
+    return "" if value is None else str(value).strip()
+
+
 def registrar_desde_dataframe(df: pd.DataFrame) -> dict:
     """
     Registra/actualiza datos desde DataFrame con columnas Poligono/Manzana/Lote.
@@ -97,9 +101,9 @@ def registrar_desde_dataframe(df: pd.DataFrame) -> dict:
     manzanas_set = set()
     lotes_set = set()
     for _, row in df.iterrows():
-        poligono = str(row[col_poligono]).strip() if row[col_poligono] is not None else ""
-        manzana = str(row[col_manzana]).strip() if row[col_manzana] is not None else ""
-        lote = str(row[col_lote]).strip() if row[col_lote] is not None else ""
+        poligono = _normalize_cell(row[col_poligono])
+        manzana = _normalize_cell(row[col_manzana])
+        lote = _normalize_cell(row[col_lote])
         if not poligono or not manzana or not lote:
             continue
         manzanas_set.add((poligono, manzana))
@@ -319,7 +323,7 @@ def cerrar_manzana(poligono: str, manzana: str, operador: str, estado_final: str
                 """,
                 (estado_final, now, now, row["id"]),
             )
-            conn.execute(
+            cur_hist = conn.execute(
                 """
                 UPDATE historial_asignaciones
                 SET estado_fin = ?, fecha_cierre = ?, detalle = ?
@@ -341,6 +345,9 @@ def cerrar_manzana(poligono: str, manzana: str, operador: str, estado_final: str
                     operador,
                 ),
             )
+            if cur_hist.rowcount <= 0:
+                conn.rollback()
+                return False, "No se encontró historial abierto para cerrar la manzana."
             conn.commit()
             return True, f"Manzana '{poligono}-{manzana}' cerrada en estado '{estado_final}'."
         except Exception:

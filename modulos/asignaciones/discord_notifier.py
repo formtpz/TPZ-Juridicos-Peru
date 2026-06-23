@@ -47,7 +47,11 @@ def notify_asignacion(operador: str, supervisor: str, manzana: str) -> bool:
 def notify_cierre(
     operador: str, supervisor: str, manzana: str, estado_final: str = "Finalizada"
 ) -> bool:
-    """Notifica que una manzana fue cerrada con estado final."""
+    """
+    Notifica que una manzana fue cerrada con estado final.
+
+    estado_final: estado de cierre esperado (p. ej. Finalizada o En conflicto).
+    """
     payload = {
         "embeds": [
             {
