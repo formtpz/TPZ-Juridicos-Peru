@@ -1,35 +1,33 @@
-# modulos/filtro_dinamico.py
+# modulos/rentas_filtrado.py
 
 import streamlit as st
 import pandas as pd
 import re
-from db import get_connection
+from db import get_engine  # <-- importamos el engine
 
 # ============ FUNCIONES DE CARGA CON CACHÉ ============
-@st.cache_data(ttl=3600)  # cache por 1 hora (datos fijos)
+@st.cache_data(ttl=3600)
 def load_filter_data():
     """
     Carga solo los campos necesarios para los filtros jerárquicos.
     """
-    conn = get_connection()
+    engine = get_engine()
     query = """
         SELECT codigo_contribuyente, manzana, lote, cod_hu 
         FROM public.rentas_vs_predio_urbano
     """
-    df = pd.read_sql(query, conn)
-    conn.close()
+    df = pd.read_sql(query, engine)  # engine maneja la conexión automáticamente
     return df
 
 @st.cache_data(ttl=3600)
 def load_full_tables():
     """
-    Carga las tres tablas completas.
+    Carga las tres tablas completas usando el engine.
     """
-    conn = get_connection()
-    contrib = pd.read_sql("SELECT * FROM public.rentas_vs_contribuyente", conn)
-    construc = pd.read_sql("SELECT * FROM public.rentas_vs_construcciones", conn)
-    predios = pd.read_sql("SELECT * FROM public.rentas_vs_predio_urbano", conn)
-    conn.close()
+    engine = get_engine()
+    contrib = pd.read_sql("SELECT * FROM public.rentas_vs_contribuyente", engine)
+    construc = pd.read_sql("SELECT * FROM public.rentas_vs_construcciones", engine)
+    predios = pd.read_sql("SELECT * FROM public.rentas_vs_predio_urbano", engine)
     return contrib, construc, predios
 
 # ============ FUNCIONES DE NORMALIZACIÓN ============
@@ -56,7 +54,6 @@ def get_normalized_manzanas(df, cod_hu_selected):
     result = {}
     for mz in manzanas:
         norm = normalize_string(mz)
-        # Si hay duplicados normalizados, conservamos el primero (o podríamos mostrar todos)
         if norm not in result:
             result[norm] = mz
     return result
@@ -129,14 +126,10 @@ def render():
 
     # --- Mostrar nota informativa sobre otras manzanas (si hay cod_hu y manzana seleccionados) ---
     if selected_cod_hu and selected_manzana:
-        # Obtener todas las manzanas para ese cod_hu
         manzanas_dict = get_normalized_manzanas(df_filtros, selected_cod_hu)
-        # Normalizar las manzanas seleccionadas
         selected_norm = [normalize_string(m) for m in selected_manzana]
-        # Otras manzanas (normalizadas) que no están en las seleccionadas
         otras_norm = [n for n in manzanas_dict.keys() if n not in selected_norm]
         if otras_norm:
-            # Mostrar los valores originales
             otras_originales = [manzanas_dict[n] for n in otras_norm]
             st.info(f"📌 El código HU **{', '.join(selected_cod_hu)}** también existe para las manzanas: **{', '.join(otras_originales)}**.")
         else:
@@ -145,7 +138,6 @@ def render():
     # --- Tabla resumen de contribuyentes ---
     st.subheader("📋 Contribuyentes encontrados")
     if not df_filtrado_ubicacion.empty:
-        # Mostrar tabla resumen
         tabla_resumen = df_filtrado_ubicacion[['codigo_contribuyente', 'manzana', 'lote', 'cod_hu']].drop_duplicates()
         st.dataframe(tabla_resumen, use_container_width=True)
 
@@ -171,10 +163,8 @@ def render():
         # Unir ambas selecciones
         contribuyentes_seleccionados = set(selected_contrib_multiselect)
         if manual_input.strip():
-            # Parsear: separar por comas o espacios y limpiar
-            import re
             codigos_manual = re.split(r'[,\s]+', manual_input.strip())
-            codigos_manual = [c for c in codigos_manual if c.isdigit()]  # solo números
+            codigos_manual = [c for c in codigos_manual if c.isdigit()]
             contribuyentes_seleccionados.update(codigos_manual)
 
         contribuyentes_seleccionados = list(contribuyentes_seleccionados)
@@ -205,8 +195,6 @@ def render():
                 with st.expander("🏠 Predios Urbanos", expanded=True):
                     st.dataframe(df_predios_filt, use_container_width=True)
 
-                # Opción de descarga (opcional)
-                # st.download_button(...)
     else:
         st.warning("No se encontraron contribuyentes con los filtros seleccionados.")
 
