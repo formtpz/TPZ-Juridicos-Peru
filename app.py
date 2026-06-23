@@ -1,5 +1,5 @@
 import streamlit as st
-from permisos import PERMISOS_POR_PERFIL
+from permisos import obtener_permisos
 
 
 # =========================
