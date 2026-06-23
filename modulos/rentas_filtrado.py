@@ -3,7 +3,7 @@
 import streamlit as st
 import pandas as pd
 import re
-from db import get_engine  # <-- importamos el engine
+from db import get_engine  # Importamos el engine SQLAlchemy
 
 # ============ FUNCIONES DE CARGA CON CACHÉ ============
 @st.cache_data(ttl=3600)
@@ -16,13 +16,13 @@ def load_filter_data():
         SELECT codigo_contribuyente, manzana, lote, cod_hu 
         FROM public.rentas_vs_predio_urbano
     """
-    df = pd.read_sql(query, engine)  # engine maneja la conexión automáticamente
+    df = pd.read_sql(query, engine)
     return df
 
 @st.cache_data(ttl=3600)
 def load_full_tables():
     """
-    Carga las tres tablas completas usando el engine.
+    Carga las tres tablas completas usando SQLAlchemy engine.
     """
     engine = get_engine()
     contrib = pd.read_sql("SELECT * FROM public.rentas_vs_contribuyente", engine)
@@ -30,33 +30,18 @@ def load_full_tables():
     predios = pd.read_sql("SELECT * FROM public.rentas_vs_predio_urbano", engine)
     return contrib, construc, predios
 
-# ============ FUNCIONES DE NORMALIZACIÓN ============
-def normalize_string(s):
+# ============ FUNCIÓN DE NORMALIZACIÓN ============
+def normalize_manzana(s):
     """
-    Normaliza una cadena: minúsculas, elimina espacios, signos de puntuación y apóstrofes.
+    Normaliza una manzana: elimina todo excepto letras (a-zA-Z) y convierte a minúsculas.
+    Ejemplo: "H-1" -> "h", "C'" -> "c", "A''" -> "a"
     """
     if pd.isna(s):
         return ''
     s = str(s)
-    # Eliminar todo excepto letras y números (elimina espacios, puntos, comas, apóstrofes, etc.)
-    s = re.sub(r'[^a-zA-Z0-9]', '', s)
+    # Eliminar todo excepto letras
+    s = re.sub(r'[^a-zA-Z]', '', s)
     return s.lower()
-
-def get_normalized_manzanas(df, cod_hu_selected):
-    """
-    Dado un cod_hu (o lista), devuelve un diccionario {normalizado: valor_original}
-    de todas las manzanas que existen para ese cod_hu.
-    """
-    if not cod_hu_selected:
-        return {}
-    mask = df['cod_hu'].isin(cod_hu_selected)
-    manzanas = df.loc[mask, 'manzana'].dropna().unique()
-    result = {}
-    for mz in manzanas:
-        norm = normalize_string(mz)
-        if norm not in result:
-            result[norm] = mz
-    return result
 
 # ============ FUNCIÓN PRINCIPAL DE RENDER ============
 def render():
@@ -69,12 +54,10 @@ def render():
         df_contrib, df_construc, df_predios = load_full_tables()
 
     # --- Filtros jerárquicos ---
-    # 1. Obtener listas únicas (ordenadas)
     cod_hu_opciones = sorted(df_filtros['cod_hu'].dropna().unique())
     manzana_opciones = sorted(df_filtros['manzana'].dropna().unique())
     lote_opciones = sorted(df_filtros['lote'].dropna().unique())
 
-    # Estado de selecciones
     selected_cod_hu = st.multiselect(
         "Código de Habilitación Urbana (cod_hu)",
         options=cod_hu_opciones,
@@ -124,16 +107,25 @@ def render():
     df_filtrado_ubicacion = df_filtros[mask_filtros]
     contribuyentes_candidatos = sorted(df_filtrado_ubicacion['codigo_contribuyente'].dropna().unique())
 
-    # --- Mostrar nota informativa sobre otras manzanas (si hay cod_hu y manzana seleccionados) ---
+    # --- Mostrar nota informativa sobre otras manzanas con la MISMA LETRA ---
     if selected_cod_hu and selected_manzana:
-        manzanas_dict = get_normalized_manzanas(df_filtros, selected_cod_hu)
-        selected_norm = [normalize_string(m) for m in selected_manzana]
-        otras_norm = [n for n in manzanas_dict.keys() if n not in selected_norm]
-        if otras_norm:
-            otras_originales = [manzanas_dict[n] for n in otras_norm]
-            st.info(f"📌 El código HU **{', '.join(selected_cod_hu)}** también existe para las manzanas: **{', '.join(otras_originales)}**.")
+        # Obtener todas las manzanas para ese cod_hu (sin filtrar por las seleccionadas)
+        todas_manzanas_codhu = df_filtros[df_filtros['cod_hu'].isin(selected_cod_hu)]['manzana'].dropna().unique()
+        
+        # Normalizar las manzanas seleccionadas
+        selected_normalized = {normalize_manzana(m) for m in selected_manzana}
+        
+        # Filtrar otras manzanas (no seleccionadas) que tengan la misma normalización
+        otras_manzanas = []
+        for mz in todas_manzanas_codhu:
+            if mz not in selected_manzana:  # excluir las ya seleccionadas
+                if normalize_manzana(mz) in selected_normalized:
+                    otras_manzanas.append(mz)
+        
+        if otras_manzanas:
+            st.info(f"📌 El código HU **{', '.join(selected_cod_hu)}** también existe para las manzanas con la misma letra: **{', '.join(sorted(otras_manzanas))}**.")
         else:
-            st.success("✅ Las manzanas seleccionadas cubren todas las existentes para ese código HU.")
+            st.success("✅ Las manzanas seleccionadas cubren todas las existentes con esa letra para ese código HU.")
 
     # --- Tabla resumen de contribuyentes ---
     st.subheader("📋 Contribuyentes encontrados")
@@ -144,7 +136,7 @@ def render():
         # Selección de contribuyentes
         st.markdown("### Selecciona los contribuyentes para visualizar sus datos completos")
 
-        # Opción 1: Multiselect (con búsqueda)
+        # Multiselect con búsqueda
         selected_contrib_multiselect = st.multiselect(
             "Selecciona contribuyentes (puedes buscar por código)",
             options=contribuyentes_candidatos,
@@ -152,7 +144,7 @@ def render():
             help="Escribe el código para buscar"
         )
 
-        # Opción 2: Ingreso manual
+        # Ingreso manual
         st.markdown("o ingresa códigos manualmente (separados por comas o espacios):")
         manual_input = st.text_area(
             "Códigos manuales",
@@ -183,7 +175,6 @@ def render():
                 mask_predios = df_predios['codigo_contribuyente'].isin(contribuyentes_seleccionados)
                 df_predios_filt = df_predios[mask_predios]
 
-                # Mostrar resultados
                 st.success(f"Mostrando datos para {len(contribuyentes_seleccionados)} contribuyente(s).")
 
                 with st.expander("📄 Contribuyentes", expanded=True):
@@ -198,6 +189,5 @@ def render():
     else:
         st.warning("No se encontraron contribuyentes con los filtros seleccionados.")
 
-    # --- Pie de página: estadísticas ---
     st.divider()
     st.caption(f"Total de contribuyentes en la base: {len(df_contrib)} | Predios: {len(df_predios)} | Construcciones: {len(df_construc)}")
