@@ -66,8 +66,12 @@ if not usuario:
 # =========================
 # USUARIO LOGUEADO
 # =========================
+
 perfil = usuario["perfil"]
-opciones = PERMISOS_POR_PERFIL.get(perfil, [])
+puesto = usuario.get("puesto")
+nombre = usuario.get("nombre")
+opciones = obtener_permisos(perfil, puesto, nombre)
+
 
 
 # =========================
