@@ -1,13 +1,17 @@
 # modulos/resultados_calidad.py
 import streamlit as st
 import pandas as pd
-from db import get_engine
+from db import fetch_df 
 
-
+@st.cache_data(ttl=60)
+def cargar_datos_calidad():
+    query = "SELECT * FROM public.calidad_externa"
+    df = fetch_df(query)
+    return df
 # ============================================================
 # CARGAR DESCRIPCIÓN DE ERRORES
 # ============================================================
-@st.cache_data
+
 def cargar_descripcion():
     url = (
         "https://raw.githubusercontent.com/formtpz/TPZ-Juridicos-Peru"
