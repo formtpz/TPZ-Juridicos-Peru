@@ -54,6 +54,15 @@ def _to_df() -> pd.DataFrame:
     )
 
 
+def _parse_seleccion(valor: str) -> tuple[str, str] | None:
+    if not valor or "|" not in valor:
+        return None
+    parts = [x.strip() for x in valor.split("|", maxsplit=1)]
+    if len(parts) != 2 or not parts[0] or not parts[1]:
+        return None
+    return parts[0], parts[1]
+
+
 st.header("1) Carga de Excel (Poligono / Manzana / Lote)")
 archivo = st.file_uploader("Sube archivo .xlsx o .xlsb", type=["xlsx", "xlsb"])
 if archivo is not None:
@@ -106,21 +115,25 @@ with col_asig:
         elif not manzana_asignar:
             st.warning("Selecciona una manzana disponible.")
         else:
-            poligono, manzana = [x.strip() for x in manzana_asignar.split("|", maxsplit=1)]
-            ok, msg = storage.asignar_manzana(poligono, manzana, operador.strip(), supervisor.strip())
-            if ok:
-                notif_ok = discord_notifier.notify_asignacion(
-                    operador.strip(), supervisor.strip(), f"{poligono}-{manzana}"
-                )
-                st.success(msg)
-                st.caption(
-                    "📨 Notificación Discord enviada."
-                    if notif_ok
-                    else "⚠️ No se pudo enviar la notificación Discord."
-                )
-                st.rerun()
+            seleccion = _parse_seleccion(manzana_asignar)
+            if not seleccion:
+                st.error("Selección inválida de manzana.")
             else:
-                st.error(msg)
+                poligono, manzana = seleccion
+                ok, msg = storage.asignar_manzana(poligono, manzana, operador.strip(), supervisor.strip())
+                if ok:
+                    notif_ok = discord_notifier.notify_asignacion(
+                        operador.strip(), supervisor.strip(), f"{poligono}-{manzana}"
+                    )
+                    st.success(msg)
+                    st.caption(
+                        "📨 Notificación Discord enviada."
+                        if notif_ok
+                        else "⚠️ No se pudo enviar la notificación Discord."
+                    )
+                    st.rerun()
+                else:
+                    st.error(msg)
 
 with col_cierre:
     st.subheader("Cerrar manzana")
@@ -147,27 +160,31 @@ with col_cierre:
         elif not manzana_cierre:
             st.warning("No hay manzana activa seleccionada para cierre.")
         else:
-            poligono, manzana = [x.strip() for x in manzana_cierre.split("|", maxsplit=1)]
-            supervisor_actual = "—"
-            match = df_estado[
-                (df_estado["Poligono"] == poligono) & (df_estado["Manzana"] == manzana)
-            ]
-            if not match.empty:
-                supervisor_actual = match.iloc[0]["Supervisor"]
-            ok, msg = storage.cerrar_manzana(poligono, manzana, operador.strip(), estado_final)
-            if ok:
-                notif_ok = discord_notifier.notify_cierre(
-                    operador.strip(), supervisor_actual, f"{poligono}-{manzana}", estado_final
-                )
-                st.success(msg)
-                st.caption(
-                    "📨 Notificación Discord enviada."
-                    if notif_ok
-                    else "⚠️ No se pudo enviar la notificación Discord."
-                )
-                st.rerun()
+            seleccion = _parse_seleccion(manzana_cierre)
+            if not seleccion:
+                st.error("Selección inválida de manzana.")
             else:
-                st.error(msg)
+                poligono, manzana = seleccion
+                supervisor_actual = "—"
+                match = df_estado[
+                    (df_estado["Poligono"] == poligono) & (df_estado["Manzana"] == manzana)
+                ]
+                if not match.empty:
+                    supervisor_actual = match.iloc[0]["Supervisor"]
+                ok, msg = storage.cerrar_manzana(poligono, manzana, operador.strip(), estado_final)
+                if ok:
+                    notif_ok = discord_notifier.notify_cierre(
+                        operador.strip(), supervisor_actual, f"{poligono}-{manzana}", estado_final
+                    )
+                    st.success(msg)
+                    st.caption(
+                        "📨 Notificación Discord enviada."
+                        if notif_ok
+                        else "⚠️ No se pudo enviar la notificación Discord."
+                    )
+                    st.rerun()
+                else:
+                    st.error(msg)
 
 
 st.divider()

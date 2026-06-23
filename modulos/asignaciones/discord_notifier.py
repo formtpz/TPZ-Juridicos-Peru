@@ -1,7 +1,10 @@
 """Envío de notificaciones a Discord mediante webhook."""
 
 import os
+import logging
 import requests
+
+logger = logging.getLogger(__name__)
 
 
 def _get_webhook_url() -> str | None:
@@ -17,7 +20,8 @@ def _send(payload: dict) -> bool:
         response = requests.post(url, json=payload, timeout=10)
         response.raise_for_status()
         return True
-    except requests.RequestException:
+    except requests.RequestException as exc:
+        logger.warning("No se pudo enviar notificación a Discord: %s", exc)
         return False
 
 
