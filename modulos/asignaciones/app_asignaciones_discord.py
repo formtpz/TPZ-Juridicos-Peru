@@ -208,7 +208,9 @@ else:
         )
         .reset_index()
     )
-    avance_poligono["avance_%"] = (avance_poligono["finalizadas"] / avance_poligono["total"] * 100).round(2)
+    avance_poligono["avance_%"] = (
+        avance_poligono["finalizadas"].div(avance_poligono["total"].replace(0, pd.NA)).fillna(0) * 100
+    ).round(2)
 
     st.subheader("Avance por polígono")
     st.dataframe(avance_poligono, use_container_width=True)
