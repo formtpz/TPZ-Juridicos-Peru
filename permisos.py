@@ -16,7 +16,9 @@ PERMISOS = {
         "Cerrar Sesion",
     ],
     "2": [
-      "Rentas Filtrado",
+        "Depuración de Datos",
+        "Filtro de Errores",
+        "Rentas Filtrado",
         "Cerrar Sesion",
     ],
     "3": [
