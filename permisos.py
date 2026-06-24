@@ -13,13 +13,13 @@ PERMISOS = {
         "Resultados Calidad",
         "Rentas Filtrado",
         "Seguimiento Supervisor",
-        "Cerrar Sesion",
+        "Cerrar Sesion"
     ],
     "2": [
         "Depuración de Datos",
         "Filtro de Errores",
         "Rentas Filtrado",
-        "Cerrar Sesion",
+        "Cerrar Sesion"
     ],
     "3": [
         "Depuración de Datos",
@@ -43,9 +43,7 @@ PERMISOS = {
     "2;Supervisor": [
         "Depuración de Datos",
         "Reglas",
-        "Compilar Detalle Errores",
         "Filtro de Errores",
-        "Resultados Calidad",
         "Rentas Filtrado",
         "Seguimiento Supervisor",
         "Cerrar Sesion"
@@ -68,9 +66,14 @@ PERMISOS = {
         "Resultados Calidad",   # opción extra que no tiene el perfil 4 base
         "Cerrar Sesion"
     ],
-    "2;Analista;Juan Perez": [
+    "2;Supervisor;Jeison Steven Alvarado Fernandez": [
         "Depuración de Datos",
-        "Filtro de Errores",    # solo algunos
+        "Reglas",
+        "Compilar Detalle Errores",
+        "Filtro de Errores",
+        "Resultados Calidad",
+        "Rentas Filtrado",
+        "Seguimiento Supervisor",
         "Cerrar Sesion"
     ],
 }
