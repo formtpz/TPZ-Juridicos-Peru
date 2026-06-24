@@ -16,11 +16,7 @@ PERMISOS = {
         "Cerrar Sesion",
     ],
     "2": [
-        "Depuración de Datos",
-        "Reglas",
-        "Compilar Detalle Errores",
-        "Filtro de Errores",
-        "Resultados Calidad",
+      
         "Cerrar Sesion",
     ],
     "3": [
