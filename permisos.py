@@ -16,7 +16,7 @@ PERMISOS = {
         "Cerrar Sesion",
     ],
     "2": [
-      
+      "Rentas Filtrado",
         "Cerrar Sesion",
     ],
     "3": [
