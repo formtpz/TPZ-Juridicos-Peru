@@ -43,6 +43,12 @@ PERMISOS = {
 
     # ---------- Perfil + puesto (sobrescriben al perfil base) ----------
     "2;Supervisor": [
+        "Depuración de Datos",
+        "Reglas",
+        "Compilar Detalle Errores",
+        "Filtro de Errores",
+        "Resultados Calidad",
+        "Rentas Filtrado",
         "Seguimiento Supervisor",
         "Cerrar Sesion"
     ],
