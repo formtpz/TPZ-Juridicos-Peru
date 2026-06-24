@@ -155,6 +155,33 @@ def generar_produccion_diaria(df_r):
     return grouped[columnas_finales]
 
 
+def generar_balance_operador(df_casos):
+    """
+    Calcula el balance neto de horas por operador a partir de los casos a revisar.
+    - Sin reporte → -8.5
+    - Con reporte y total < 8.5 → -(8.5 - total)
+    - Con reporte y total > 8.5 → total - 8.5
+    """
+    if df_casos.empty:
+        return pd.DataFrame()
+
+    def calcular_desviacion(row):
+        if not row['tiene_reporte']:
+            return -8.5
+        elif row['total'] < 8.5:
+            return -(8.5 - row['total'])
+        elif row['total'] > 8.5:
+            return row['total'] - 8.5
+        else:
+            return 0.0
+
+    df_casos = df_casos.copy()
+    df_casos['desviacion'] = df_casos.apply(calcular_desviacion, axis=1)
+    balance = df_casos.groupby('nombre', as_index=False)['desviacion'].sum()
+    balance['balance_horas'] = balance['desviacion'].round(2)
+    return balance[['nombre', 'balance_horas']]
+
+
 # ============================================================
 # FUNCIÓN PRINCIPAL RENDER
 # ============================================================
@@ -187,12 +214,12 @@ def render():
         st.error("La fecha de inicio no puede ser mayor a la fecha fin.")
         return
 
-    # --- FILTRO POR OPERADOR (multiselect con todas seleccionadas por defecto) ---
+    # --- FILTRO POR OPERADOR ---
     st.markdown("### 👥 Filtrar por Operador")
     personal_filtrado = st.multiselect(
         "Selecciona uno o varios operadores",
         options=personal_asignado,
-        default=personal_asignado,  # Todas seleccionadas por defecto
+        default=personal_asignado,
         key="filtro_operador"
     )
 
@@ -202,7 +229,7 @@ def render():
 
     st.info(f"Mostrando datos para {len(personal_filtrado)} operador(es) de {len(personal_asignado)} totales.")
 
-    # --- Cargar datos (solo para los operadores seleccionados) ---
+    # --- Cargar datos ---
     with st.spinner("Cargando datos..."):
         df_r, df_c, df_o = cargar_datos_personal((fecha_inicio, fecha_fin), personal_filtrado)
 
@@ -226,12 +253,12 @@ def render():
         styled_horas = df_horas.style.map(color_total, subset=['total'])
         st.dataframe(styled_horas, use_container_width=True)
 
-        # --- Casos a revisar (usando personal_filtrado) ---
+        # --- Casos a revisar ---
         st.subheader("🔍 Casos a Revisar")
         fechas_range = pd.date_range(start=fecha_inicio, end=fecha_fin, freq='D')
         all_comb = pd.DataFrame([
             (nombre, fecha.date())
-            for nombre in personal_filtrado  # <--- Usamos la lista filtrada
+            for nombre in personal_filtrado
             for fecha in fechas_range
         ], columns=['nombre', 'fecha'])
 
@@ -247,6 +274,7 @@ def render():
         )
 
         df_casos = df_completo[df_completo['total'] != 8.5]
+
         if df_casos.empty:
             st.success("✅ Todos los días registran 8.5 horas exactas.")
         else:
@@ -266,26 +294,40 @@ def render():
             styled_casos = casos_vista.style.map(color_caso, subset=['Caso'])
             st.dataframe(styled_casos, use_container_width=True)
 
+            # --- NUEVO: Balance de Horas por Operador ---
+            st.subheader("⚖️ Balance de Horas por Operador")
+            df_balance = generar_balance_operador(df_casos)
+            if not df_balance.empty:
+                def color_balance(val):
+                    if val == 0:
+                        return 'background-color: #90EE90'  # verde
+                    elif val < 0:
+                        return 'background-color: #FF6B6B; color: white'  # rojo
+                    else:
+                        return 'background-color: #FFD700'  # amarillo
+
+                styled_balance = df_balance.style.map(color_balance, subset=['balance_horas'])
+                st.dataframe(styled_balance, use_container_width=True)
+            else:
+                st.info("No hay datos para calcular el balance.")
+
     # --- 2. Producción Diaria por Proceso ---
     st.subheader("📈 Producción Diaria por Proceso")
     df_prod = generar_produccion_diaria(df_r)
     if df_prod.empty:
         st.info("No hay datos de producción.")
     else:
-        # Aplicar estilo al cumplimiento
         def color_cumplimiento(val):
             if val >= 90:
-                return 'background-color: #90EE90'  # verde
+                return 'background-color: #90EE90'
             else:
-                return 'background-color: #FFD700'  # amarillo
+                return 'background-color: #FFD700'
 
         styled_prod = df_prod.style.map(color_cumplimiento, subset=['cumplimiento'])
         st.dataframe(styled_prod, use_container_width=True)
 
-        # --- Gráfico de evolución del ratio por persona ---
+        # --- Gráfico de evolución del ratio ---
         st.subheader("📈 Evolución del Ratio por Persona (producción / horas)")
-
-        # Calcular ratio agregado por fecha y persona (sin proceso)
         df_ratio_agg = df_r.groupby(['fecha', 'nombre'], as_index=False).agg({
             'edificas': 'sum',
             'unidades_catastrales': 'sum',
