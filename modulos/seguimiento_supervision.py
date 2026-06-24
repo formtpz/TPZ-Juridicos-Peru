@@ -5,6 +5,7 @@ import numpy as np
 from datetime import datetime, timedelta
 import pytz
 from db import fetch_df
+import plotly.express as px
 
 # Zona horaria
 TZ = pytz.timezone('America/Guatemala')
@@ -25,7 +26,6 @@ TASAS_POR_HORA = {
 
 @st.cache_data(ttl=300)
 def obtener_personal_asignado(supervisor_nombre):
-    """Devuelve lista de nombres de usuarios cuyo supervisor es el dado."""
     df = fetch_df(
         "SELECT nombre FROM usuarios WHERE supervisor = %s AND estado = 'Activo' ORDER BY nombre",
         params=[supervisor_nombre]
@@ -35,12 +35,10 @@ def obtener_personal_asignado(supervisor_nombre):
 
 @st.cache_data(ttl=60)
 def cargar_datos_personal(fechas, personal):
-    """Carga datos de registro, capacitaciones y otros_registros."""
     fecha_inicio, fecha_fin = fechas
     if not personal:
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
-    # --- Registro (excluyendo horas extras) ---
     query_r = """
         SELECT 
             nombre, 
@@ -57,7 +55,6 @@ def cargar_datos_personal(fechas, personal):
     """
     df_r = fetch_df(query_r, params=[personal, fecha_inicio, fecha_fin])
 
-    # --- Capacitaciones ---
     query_c = """
         SELECT 
             nombre, 
@@ -70,7 +67,6 @@ def cargar_datos_personal(fechas, personal):
     """
     df_c = fetch_df(query_c, params=[personal, fecha_inicio, fecha_fin])
 
-    # --- Otros registros (excluyendo horas extra y reposición) ---
     query_o = """
         SELECT 
             nombre, 
@@ -88,50 +84,36 @@ def cargar_datos_personal(fechas, personal):
 
 
 # ============================================================
-# FUNCIONES DE PROCESAMIENTO (similares a las de la App 1)
+# FUNCIONES DE PROCESAMIENTO
 # ============================================================
 
 def generar_resumen_horas(df_r, df_c, df_o):
-    """
-    Genera resumen de horas diarias por persona.
-    Lógica similar a la App 1: agrupa cada tabla y luego hace merge.
-    """
-    # --- Agrupar producción ---
     if not df_r.empty:
         prod = df_r.groupby(['nombre', 'fecha'], as_index=False)['horas'].sum().rename(columns={'horas': 'horas_produccion'})
     else:
         prod = pd.DataFrame(columns=['nombre', 'fecha', 'horas_produccion'])
 
-    # --- Agrupar capacitaciones ---
     if not df_c.empty:
         cap = df_c.groupby(['nombre', 'fecha'], as_index=False)['horas'].sum().rename(columns={'horas': 'horas_capacitacion'})
     else:
         cap = pd.DataFrame(columns=['nombre', 'fecha', 'horas_capacitacion'])
 
-    # --- Agrupar otros registros ---
     if not df_o.empty:
         otros = df_o.groupby(['nombre', 'fecha'], as_index=False)['horas'].sum().rename(columns={'horas': 'horas_otros'})
     else:
         otros = pd.DataFrame(columns=['nombre', 'fecha', 'horas_otros'])
 
-    # --- Combinar con merges sucesivos (como en la App 1) ---
-    # Obtener todas las combinaciones únicas de nombre-fecha de los tres dataframes
     combinados = pd.concat([prod[['nombre', 'fecha']], cap[['nombre', 'fecha']], otros[['nombre', 'fecha']]], axis=0)
     if combinados.empty:
         return pd.DataFrame()
 
     keys = combinados.drop_duplicates().reset_index(drop=True)
-
-    # Merge sucesivos
     merged = keys.merge(prod, on=['nombre', 'fecha'], how='left')
     merged = merged.merge(cap, on=['nombre', 'fecha'], how='left')
     merged = merged.merge(otros, on=['nombre', 'fecha'], how='left')
     merged = merged.fillna(0)
 
-    # Calcular total
     merged['total'] = merged['horas_produccion'] + merged['horas_capacitacion'] + merged['horas_otros']
-
-    # Redondear
     for col in ['horas_produccion', 'horas_capacitacion', 'horas_otros', 'total']:
         if col in merged.columns:
             merged[col] = merged[col].round(2)
@@ -140,7 +122,11 @@ def generar_resumen_horas(df_r, df_c, df_o):
 
 
 def generar_produccion_diaria(df_r):
-    """Genera tabla de producción diaria por persona y proceso."""
+    """
+    Genera tabla de producción diaria por persona y proceso.
+    Columnas: nombre, fecha, proceso, horas, produccion (edificas+unidades),
+    valor_esperado, cumplimiento (%).
+    """
     if df_r.empty:
         return pd.DataFrame()
 
@@ -150,19 +136,27 @@ def generar_produccion_diaria(df_r):
         'unidades_catastrales': 'sum'
     })
 
-    grouped['ratio'] = np.where(
-        grouped['horas'] > 0,
-        (grouped['edificas'] + grouped['unidades_catastrales']) / grouped['horas'],
-        0
-    )
-    grouped['ratio'] = grouped['ratio'].round(2)
+    # Producción total
+    grouped['produccion'] = grouped['edificas'] + grouped['unidades_catastrales']
 
+    # Valor esperado = tasa * horas
     grouped['tasa'] = grouped['proceso'].map(TASAS_POR_HORA).fillna(0)
     grouped['valor_esperado'] = grouped['tasa'] * grouped['horas']
-    grouped['diferencia'] = (grouped['edificas'] + grouped['unidades_catastrales']) - grouped['valor_esperado']
-    grouped['diferencia'] = grouped['diferencia'].round(2)
+    grouped['valor_esperado'] = grouped['valor_esperado'].round(2)
 
-    return grouped.sort_values(['fecha', 'nombre', 'proceso']).reset_index(drop=True)
+    # Cumplimiento = produccion / valor_esperado (en porcentaje)
+    grouped['cumplimiento'] = np.where(
+        grouped['valor_esperado'] > 0,
+        (grouped['produccion'] / grouped['valor_esperado']) * 100,
+        0
+    )
+    grouped['cumplimiento'] = grouped['cumplimiento'].round(1)
+
+    # Ordenar
+    grouped = grouped.sort_values(['fecha', 'nombre', 'proceso']).reset_index(drop=True)
+
+    # Seleccionar columnas a mostrar
+    return grouped[['nombre', 'fecha', 'proceso', 'horas', 'produccion', 'valor_esperado', 'cumplimiento']]
 
 
 # ============================================================
@@ -185,7 +179,6 @@ def render():
     st.title("📊 Seguimiento de Supervisor")
     st.markdown(f"**Supervisor:** {nombre_supervisor} | **Personal a cargo:** {len(personal_asignado)}")
 
-    # --- Filtro de fechas ---
     hoy = datetime.now(TZ).date()
     col1, col2 = st.columns(2)
     with col1:
@@ -197,44 +190,35 @@ def render():
         st.error("La fecha de inicio no puede ser mayor a la fecha fin.")
         return
 
-    # --- Cargar datos ---
     with st.spinner("Cargando datos..."):
         df_r, df_c, df_o = cargar_datos_personal((fecha_inicio, fecha_fin), personal_asignado)
 
-    # --- [DEPURACIÓN] Mostrar dataframes crudos (descomentar para revisar) ---
+    # --- [DEPURACIÓN] ---
     with st.expander("🔍 Depuración (datos cargados)"):
-        st.write("**Registro (df_r):**")
-        st.write(f"Filas: {len(df_r)}")
+        st.write("**Registro (df_r):**", f"Filas: {len(df_r)}")
         st.dataframe(df_r.head(10))
-        st.write("**Capacitaciones (df_c):**")
-        st.write(f"Filas: {len(df_c)}")
+        st.write("**Capacitaciones (df_c):**", f"Filas: {len(df_c)}")
         st.dataframe(df_c.head(10))
-        st.write("**Otros Registros (df_o):**")
-        st.write(f"Filas: {len(df_o)}")
+        st.write("**Otros Registros (df_o):**", f"Filas: {len(df_o)}")
         st.dataframe(df_o.head(10))
 
-    # --- 1. Resumen de Horas (estilo original) ---
+    # --- 1. Resumen de Horas ---
     st.subheader("📋 Resumen de Horas Diarias")
-
     df_horas = generar_resumen_horas(df_r, df_c, df_o)
 
     if df_horas.empty:
         st.info("No se encontraron horas registradas en el período seleccionado.")
     else:
-        # Aplicar estilo: verde si total == 8.5, amarillo en otro caso
         def color_total(val):
             if val == 8.5:
-                return 'background-color: #90EE90'  # verde
+                return 'background-color: #90EE90'
             else:
-                return 'background-color: #FFD700'  # amarillo
-
+                return 'background-color: #FFD700'
         styled_horas = df_horas.style.map(color_total, subset=['total'])
         st.dataframe(styled_horas, use_container_width=True)
 
-        # --- 2. Casos a revisar (incluye los que no tienen reporte) ---
+        # --- 2. Casos a revisar ---
         st.subheader("🔍 Casos a Revisar")
-
-        # Generar todas las combinaciones de personal x fechas
         fechas_range = pd.date_range(start=fecha_inicio, end=fecha_fin, freq='D')
         all_comb = pd.DataFrame([
             (nombre, fecha.date())
@@ -242,27 +226,21 @@ def render():
             for fecha in fechas_range
         ], columns=['nombre', 'fecha'])
 
-        # Hacer left join con df_horas para detectar ausencias
         df_completo = all_comb.merge(df_horas, on=['nombre', 'fecha'], how='left')
-        # Rellenar NaN con 0
         for col in ['horas_produccion', 'horas_capacitacion', 'horas_otros', 'total']:
             if col in df_completo.columns:
                 df_completo[col] = df_completo[col].fillna(0)
 
-        # Marcar si tiene reporte (si al menos una columna de horas > 0)
         df_completo['tiene_reporte'] = (
             (df_completo['horas_produccion'] > 0) | 
             (df_completo['horas_capacitacion'] > 0) | 
             (df_completo['horas_otros'] > 0)
         )
 
-        # Filtrar casos a revisar: total != 8.5
         df_casos = df_completo[df_completo['total'] != 8.5]
-
         if df_casos.empty:
             st.success("✅ Todos los días registran 8.5 horas exactas.")
         else:
-            # Crear columna descriptiva
             def determinar_caso(row):
                 if not row['tiene_reporte']:
                     return "Sin Reportes"
@@ -274,32 +252,71 @@ def render():
             df_casos['Caso'] = df_casos.apply(determinar_caso, axis=1)
             casos_vista = df_casos[['nombre', 'fecha', 'total', 'Caso']]
 
-            # Resaltar "Sin Reportes" en rojo
             def color_caso(val):
                 if val == "Sin Reportes":
                     return 'color: red; font-weight: bold'
                 return ''
-
             styled_casos = casos_vista.style.map(color_caso, subset=['Caso'])
             st.dataframe(styled_casos, use_container_width=True)
 
-    # --- 3. Producción Diaria por Proceso ---
+    # --- 3. Producción Diaria por Proceso (NUEVA VERSIÓN) ---
     st.subheader("📈 Producción Diaria por Proceso")
     df_prod = generar_produccion_diaria(df_r)
     if df_prod.empty:
         st.info("No hay datos de producción.")
     else:
-        st.dataframe(df_prod, use_container_width=True)
+        # Aplicar color al cumplimiento
+        def color_cumplimiento(val):
+            if val >= 90:
+                return 'background-color: #90EE90'
+            else:
+                return 'background-color: #FFD700'
+        styled_prod = df_prod.style.map(color_cumplimiento, subset=['cumplimiento'])
+        st.dataframe(styled_prod, use_container_width=True)
 
-        # --- Tabla de bajo rendimiento ---
-        st.subheader("⚠️ Personal con Bajo Rendimiento")
-        bajo_rendimiento = df_prod[df_prod['diferencia'] < 0].copy()
-        if bajo_rendimiento.empty:
-            st.success("✅ Todo el personal cumple o supera las metas esperadas.")
-        else:
-            bajo_rendimiento['Faltante'] = bajo_rendimiento['diferencia'].abs().apply(lambda x: f"{x:.2f} unidades")
-            bajo_vista = bajo_rendimiento[['fecha', 'nombre', 'proceso', 'diferencia', 'Faltante']]
-            st.dataframe(bajo_vista, use_container_width=True)
+    # --- 4. Gráfico de evolución del ratio ---
+    if not df_r.empty:
+        st.subheader("📉 Evolución del Ratio (Producción / Hora) por Persona")
+        # Calcular ratio diario por persona y proceso (agrupado por persona y fecha)
+        ratio_df = df_r.groupby(['nombre', 'fecha'], as_index=False).agg({
+            'horas': 'sum',
+            'edificas': 'sum',
+            'unidades_catastrales': 'sum'
+        })
+        ratio_df['ratio'] = np.where(
+            ratio_df['horas'] > 0,
+            (ratio_df['edificas'] + ratio_df['unidades_catastrales']) / ratio_df['horas'],
+            0
+        )
+        ratio_df['ratio'] = ratio_df['ratio'].round(2)
+
+        # Ordenar por fecha
+        ratio_df = ratio_df.sort_values(['nombre', 'fecha'])
+
+        # Seleccionar personas para el gráfico
+        personas_disponibles = sorted(ratio_df['nombre'].unique())
+        personas_seleccionadas = st.multiselect(
+            "Selecciona una o varias personas para ver su evolución",
+            options=personas_disponibles,
+            default=personas_disponibles[:3] if len(personas_disponibles) >= 3 else personas_disponibles
+        )
+
+        if personas_seleccionadas:
+            df_filtrado = ratio_df[ratio_df['nombre'].isin(personas_seleccionadas)]
+            if not df_filtrado.empty:
+                fig = px.line(
+                    df_filtrado,
+                    x='fecha',
+                    y='ratio',
+                    color='nombre',
+                    markers=True,
+                    title='Evolución del Ratio (Producción / Hora)',
+                    labels={'ratio': 'Ratio (Prod/Hora)', 'fecha': 'Fecha', 'nombre': 'Persona'}
+                )
+                # Añadir línea de referencia para ratio esperado (por ejemplo, el promedio ponderado o un valor objetivo)
+                # Podemos calcular el ratio esperado promedio según las tasas de cada proceso, pero es complejo; 
+                # dejamos solo la línea.
+                st.plotly_chart(fig, use_container_width=True)
 
     # --- Actualizar ---
     st.divider()
