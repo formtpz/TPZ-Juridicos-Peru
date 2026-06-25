@@ -73,7 +73,6 @@ nombre = usuario.get("nombre")
 opciones = obtener_permisos(perfil, puesto, nombre)
 
 
-
 # =========================
 # MENÚ LATERAL
 # =========================
@@ -123,7 +122,7 @@ elif opcion == "Resultados Calidad":
 #elif opcion == "Cargar Asignaciones":
 
 #    from modulos.cargar_asignaciones import render
- #   render()
+#   render()
 
 
 # Reportes producción
@@ -167,9 +166,28 @@ elif opcion == "Rentas Filtrado":
     render()
 
 elif opcion == "Seguimiento Supervisor":
-
-    from modulos.seguimiento_supervision import render
-    render()
+    # Submenú en el sidebar
+    with st.sidebar:
+        st.markdown("### Submódulos")
+        subopcion = st.radio(
+            "Seleccione una vista",
+            options=["📊 Resumen General", "⏱️ Horas Extra", "📋 Control de Calidad"],
+            key="submodulo_supervisor"
+        )
+    
+    if subopcion == "📊 Resumen General":
+        from modulos.seguimiento_supervision import render
+        render()
+    elif subopcion == "⏱️ Horas Extra":
+        # Aquí importarás tu módulo de horas extra cuando esté listo
+        # from modulos.seguimiento_horas_extra import render
+        # render()
+        st.info("Módulo en construcción: Horas Extra")
+    elif subopcion == "📋 Control de Calidad":
+        # Aquí importarás tu módulo de control de calidad cuando esté listo
+        # from modulos.seguimiento_calidad import render
+        # render()
+        st.info("Módulo en construcción: Control de Calidad")
     
 elif opcion == "Reporte de Horas":   
     from modulos.reporte_horas import render
