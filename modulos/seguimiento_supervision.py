@@ -158,22 +158,30 @@ def generar_produccion_diaria(df_r):
 def generar_balance_operador(df_casos):
     """
     Calcula el balance neto de horas por operador a partir de los casos a revisar.
-    - Sin reporte → -8.5
-    - Con reporte y total < 8.5 → -(8.5 - total)
-    - Con reporte y total > 8.5 → total - 8.5
+    - Días hábiles (lun-vie): sin reporte → -8.5, con reporte → desviación.
+    - Fines de semana (sáb-dom): solo se considera si hay reporte (desviación), sino se ignora.
     """
     if df_casos.empty:
         return pd.DataFrame()
 
     def calcular_desviacion(row):
+        fecha = row['fecha']
+        # weekday(): 0=lunes, 5=sábado, 6=domingo
+        es_fin_semana = fecha.weekday() in [5, 6]
+        
         if not row['tiene_reporte']:
-            return -8.5
-        elif row['total'] < 8.5:
-            return -(8.5 - row['total'])
-        elif row['total'] > 8.5:
-            return row['total'] - 8.5
+            if es_fin_semana:
+                return 0.0  # Ignorar fines de semana sin reporte
+            else:
+                return -8.5  # Día hábil sin reporte
         else:
-            return 0.0
+            # Tiene reporte, calcular desviación
+            if row['total'] < 8.5:
+                return -(8.5 - row['total'])
+            elif row['total'] > 8.5:
+                return row['total'] - 8.5
+            else:
+                return 0.0
 
     df_casos = df_casos.copy()
     df_casos['desviacion'] = df_casos.apply(calcular_desviacion, axis=1)
@@ -273,10 +281,15 @@ def render():
             (df_completo['horas_otros'] > 0)
         )
 
-        df_casos = df_completo[df_completo['total'] != 8.5]
+        # --- FILTRO: Excluir fines de semana sin reporte ---
+        df_completo['es_fin_semana'] = df_completo['fecha'].dt.weekday.isin([5, 6])
+        df_casos = df_completo[
+            (df_completo['total'] != 8.5) &
+            ~(df_completo['es_fin_semana'] & ~df_completo['tiene_reporte'])
+        ].copy()
 
         if df_casos.empty:
-            st.success("✅ Todos los días registran 8.5 horas exactas.")
+            st.success("✅ Todos los días hábiles registran 8.5 horas exactas.")
         else:
             def determinar_caso(row):
                 if not row['tiene_reporte']:
@@ -294,17 +307,17 @@ def render():
             styled_casos = casos_vista.style.map(color_caso, subset=['Caso'])
             st.dataframe(styled_casos, use_container_width=True)
 
-            # --- NUEVO: Balance de Horas por Operador ---
+            # --- Balance de Horas por Operador ---
             st.subheader("⚖️ Balance de Horas por Operador")
             df_balance = generar_balance_operador(df_casos)
             if not df_balance.empty:
                 def color_balance(val):
                     if val == 0:
-                        return 'background-color: #90EE90'  # verde
+                        return 'background-color: #90EE90'
                     elif val < 0:
-                        return 'background-color: #FF6B6B; color: white'  # rojo
+                        return 'background-color: #FF6B6B; color: white'
                     else:
-                        return 'background-color: #FFD700'  # amarillo
+                        return 'background-color: #FFD700'
 
                 styled_balance = df_balance.style.map(color_balance, subset=['balance_horas'])
                 st.dataframe(styled_balance, use_container_width=True)
