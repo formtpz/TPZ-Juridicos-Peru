@@ -21,7 +21,7 @@ TASAS_POR_HORA = {
 }
 
 # ============================================================
-# FUNCIONES DE CARGA DE DATOS
+# FUNCIONES DE CARGA DE DATOS (con manejo de fechas varchar)
 # ============================================================
 
 @st.cache_data(ttl=300)
@@ -39,46 +39,55 @@ def cargar_datos_personal(fechas, personal):
     if not personal:
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
+    # Convertir fechas a string para la consulta (por si acaso)
+    fecha_inicio_str = fecha_inicio.strftime('%Y-%m-%d')
+    fecha_fin_str = fecha_fin.strftime('%Y-%m-%d')
+
     query_r = """
         SELECT 
             nombre, 
-            fecha::date as fecha,
+            NULLIF(TRIM(fecha), '')::date as fecha,
             proceso,
             COALESCE(edificas::float, 0) AS edificas,
             COALESCE(unidades_catastrales::float, 0) AS unidades_catastrales,
             COALESCE(horas::float, 0) AS horas
         FROM registro
         WHERE nombre = ANY(%s)
-          AND fecha::date >= %s 
-          AND fecha::date <= %s
+          AND NULLIF(TRIM(fecha), '')::date >= %s 
+          AND NULLIF(TRIM(fecha), '')::date <= %s
           AND tipo NOT IN ('Producción Horas Extras', 'Inspección Horas Extras', 'Reproceso Horas Extras')
     """
-    df_r = fetch_df(query_r, params=[personal, fecha_inicio, fecha_fin])
+    df_r = fetch_df(query_r, params=[personal, fecha_inicio_str, fecha_fin_str])
 
     query_c = """
         SELECT 
             nombre, 
-            fecha::date as fecha,
+            NULLIF(TRIM(fecha), '')::date as fecha,
             COALESCE(horas::float, 0) AS horas
         FROM capacitaciones
         WHERE nombre = ANY(%s)
-          AND fecha::date >= %s 
-          AND fecha::date <= %s
+          AND NULLIF(TRIM(fecha), '')::date >= %s 
+          AND NULLIF(TRIM(fecha), '')::date <= %s
     """
-    df_c = fetch_df(query_c, params=[personal, fecha_inicio, fecha_fin])
+    df_c = fetch_df(query_c, params=[personal, fecha_inicio_str, fecha_fin_str])
 
     query_o = """
         SELECT 
             nombre, 
-            fecha::date as fecha,
+            NULLIF(TRIM(fecha), '')::date as fecha,
             COALESCE(horas::float, 0) AS horas
         FROM otros_registros
         WHERE nombre = ANY(%s)
-          AND fecha::date >= %s 
-          AND fecha::date <= %s
+          AND NULLIF(TRIM(fecha), '')::date >= %s 
+          AND NULLIF(TRIM(fecha), '')::date <= %s
           AND motivo NOT IN ('Horas Extra', 'Horas Extra Apoyo Otros Proyectos', 'Horas Extras', 'Reposición de tiempo')
     """
-    df_o = fetch_df(query_o, params=[personal, fecha_inicio, fecha_fin])
+    df_o = fetch_df(query_o, params=[personal, fecha_inicio_str, fecha_fin_str])
+
+    # Asegurar que la columna fecha sea datetime (por si hay nulos)
+    for df in [df_r, df_c, df_o]:
+        if not df.empty:
+            df['fecha'] = pd.to_datetime(df['fecha'], errors='coerce').dt.date
 
     return df_r, df_c, df_o
 
@@ -157,31 +166,23 @@ def generar_produccion_diaria(df_r):
 
 def generar_balance_operador(df_casos):
     """
-    Calcula el balance neto de horas por operador a partir de los casos a revisar.
-    - Días hábiles (lun-vie): sin reporte → -8.5, con reporte → desviación.
-    - Fines de semana (sáb-dom): solo se considera si hay reporte (desviación), sino se ignora.
+    Calcula el balance neto de horas por operador considerando solo los casos
+    que no son fines de semana sin reporte.
     """
     if df_casos.empty:
         return pd.DataFrame()
 
     def calcular_desviacion(row):
-        fecha = row['fecha']
-        # weekday(): 0=lunes, 5=sábado, 6=domingo
-        es_fin_semana = fecha.weekday() in [5, 6]
-        
         if not row['tiene_reporte']:
-            if es_fin_semana:
-                return 0.0  # Ignorar fines de semana sin reporte
-            else:
-                return -8.5  # Día hábil sin reporte
+            # Esto no debería ocurrir porque filtramos fines de semana sin reporte,
+            # pero lo dejamos por seguridad.
+            return -8.5
+        elif row['total'] < 8.5:
+            return -(8.5 - row['total'])
+        elif row['total'] > 8.5:
+            return row['total'] - 8.5
         else:
-            # Tiene reporte, calcular desviación
-            if row['total'] < 8.5:
-                return -(8.5 - row['total'])
-            elif row['total'] > 8.5:
-                return row['total'] - 8.5
-            else:
-                return 0.0
+            return 0.0
 
     df_casos = df_casos.copy()
     df_casos['desviacion'] = df_casos.apply(calcular_desviacion, axis=1)
@@ -261,8 +262,9 @@ def render():
         styled_horas = df_horas.style.map(color_total, subset=['total'])
         st.dataframe(styled_horas, use_container_width=True)
 
-        # --- Casos a revisar ---
+        # --- Casos a revisar (excluyendo fines de semana sin reporte) ---
         st.subheader("🔍 Casos a Revisar")
+        st.caption("Nota: Los fines de semana (sábado y domingo) sin reporte NO se consideran como casos a revisar.")
         fechas_range = pd.date_range(start=fecha_inicio, end=fecha_fin, freq='D')
         all_comb = pd.DataFrame([
             (nombre, fecha.date())
@@ -281,15 +283,15 @@ def render():
             (df_completo['horas_otros'] > 0)
         )
 
-        # --- FILTRO: Excluir fines de semana sin reporte ---
-        df_completo['es_fin_semana'] = df_completo['fecha'].dt.weekday.isin([5, 6])
-        df_casos = df_completo[
-            (df_completo['total'] != 8.5) &
-            ~(df_completo['es_fin_semana'] & ~df_completo['tiene_reporte'])
-        ].copy()
+        # Identificar fines de semana (dayofweek: 5=sábado, 6=domingo)
+        df_completo['es_fin_semana'] = pd.to_datetime(df_completo['fecha']).dt.dayofweek.isin([5, 6])
+
+        # Casos a revisar: total != 8.5 Y (NO es fin de semana sin reporte)
+        mask_caso = (df_completo['total'] != 8.5) & ~(df_completo['es_fin_semana'] & ~df_completo['tiene_reporte'])
+        df_casos = df_completo[mask_caso]
 
         if df_casos.empty:
-            st.success("✅ Todos los días hábiles registran 8.5 horas exactas.")
+            st.success("✅ No hay casos que requieran revisión (considerando fines de semana sin reporte).")
         else:
             def determinar_caso(row):
                 if not row['tiene_reporte']:
@@ -307,20 +309,29 @@ def render():
             styled_casos = casos_vista.style.map(color_caso, subset=['Caso'])
             st.dataframe(styled_casos, use_container_width=True)
 
-            # --- Balance de Horas por Operador ---
+            # --- Balance de Horas por Operador (solo sobre los casos filtrados) ---
             st.subheader("⚖️ Balance de Horas por Operador")
             df_balance = generar_balance_operador(df_casos)
             if not df_balance.empty:
+                # Añadir columna de fines de semana ignorados (solo informativo)
+                fines_ignorados = df_completo[
+                    df_completo['es_fin_semana'] & ~df_completo['tiene_reporte']
+                ].groupby('nombre').size().reset_index(name='fines_sin_reporte_ignorados')
+                
+                df_balance = df_balance.merge(fines_ignorados, on='nombre', how='left').fillna(0)
+                df_balance['fines_sin_reporte_ignorados'] = df_balance['fines_sin_reporte_ignorados'].astype(int)
+
                 def color_balance(val):
                     if val == 0:
-                        return 'background-color: #90EE90'
+                        return 'background-color: #90EE90'  # verde
                     elif val < 0:
-                        return 'background-color: #FF6B6B; color: white'
+                        return 'background-color: #FF6B6B; color: white'  # rojo
                     else:
-                        return 'background-color: #FFD700'
+                        return 'background-color: #FFD700'  # amarillo
 
                 styled_balance = df_balance.style.map(color_balance, subset=['balance_horas'])
                 st.dataframe(styled_balance, use_container_width=True)
+                st.caption("El balance considera solo los días laborales (no fines de semana sin reporte).")
             else:
                 st.info("No hay datos para calcular el balance.")
 
