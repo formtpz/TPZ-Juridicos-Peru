@@ -17,7 +17,9 @@ TASAS_POR_HORA = {
     'Postcampo': 7,
     'Control de Calidad Postcampo': 10,
     'Vinculación Precampo': 5,
-    'Control de Calidad Vinculación Precampo': 10
+    'Control de Calidad Vinculación Precampo': 10,
+    'Masivos QC Vinculación': 15,
+    'Masivos QC Postcampo': 15
 }
 
 # ============================================================
