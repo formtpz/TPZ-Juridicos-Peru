@@ -184,10 +184,8 @@ elif opcion == "Seguimiento Supervisor":
         # render()
         st.info("Módulo en construcción: Horas Extra")
     elif subopcion == "📋 Control de Calidad":
-        # Aquí importarás tu módulo de control de calidad cuando esté listo
-        # from modulos.seguimiento_calidad import render
-        # render()
-        st.info("Módulo en construcción: Control de Calidad")
+        from modulos.seguimiento_calidad import render
+                render()
     
 elif opcion == "Reporte de Horas":   
     from modulos.reporte_horas import render
