@@ -61,6 +61,37 @@ def get_available_error_files():
     return sorted(available_files)
 
 
+def sync_error_file_session_state(available_files):
+    """
+    Sincroniza el estado de Streamlit con los Excel que existen actualmente
+    para evitar referencias obsoletas a archivos ya eliminados.
+    """
+    current_files = set(available_files)
+    previous_files = set(st.session_state.get("error_repository_files", []))
+    removed_files = sorted(previous_files - current_files)
+
+    current_error_file = st.session_state.get("current_error_file")
+    if current_error_file and current_error_file not in current_files:
+        removed_files = sorted(set(removed_files + [current_error_file]))
+        st.session_state.current_error_file = None
+        st.session_state.error_sheets_cache = {}
+        st.session_state.file_modified = False
+        st.session_state.file_loaded = False
+
+    selected_error_file = st.session_state.get("selected_error_file")
+    if selected_error_file and selected_error_file not in current_files:
+        st.session_state.selected_error_file = None
+
+    if available_files:
+        if st.session_state.get("selected_error_file") not in current_files:
+            st.session_state.selected_error_file = available_files[0]
+    else:
+        st.session_state.selected_error_file = None
+
+    st.session_state.error_repository_files = list(available_files)
+    return removed_files
+
+
 def load_error_file(filename):
     """
     Carga un archivo Excel desde Repositorio_de_Errores
@@ -503,10 +534,21 @@ def render():
         st.session_state.file_modified = False
     if "file_loaded" not in st.session_state:
         st.session_state.file_loaded = False
+    if "selected_error_file" not in st.session_state:
+        st.session_state.selected_error_file = None
+    if "error_repository_files" not in st.session_state:
+        st.session_state.error_repository_files = []
     
     st.subheader("📁 Selecciona un archivo de errores")
     
     available_files = get_available_error_files()
+    removed_files = sync_error_file_session_state(available_files)
+
+    if removed_files:
+        st.info(
+            "🧹 Se actualizaron los archivos disponibles y se quitaron del estado los Excel eliminados: "
+            + ", ".join(removed_files)
+        )
     
     if not available_files:
         st.warning("⚠️ No hay archivos Excel en la carpeta 'Repositorio_de_Errores'")
@@ -520,7 +562,8 @@ def render():
         error_file = st.selectbox(
             "🗂️ Archivo de errores disponibles",
             options=available_files,
-            help="Selecciona el archivo Excel que deseas procesar"
+            help="Selecciona el archivo Excel que deseas procesar",
+            key="selected_error_file"
         )
     
     with col2:
@@ -533,14 +576,19 @@ def render():
     
     # Cargar archivo SOLO cuando se presiona el botón
     if load_button:
-        if error_file != st.session_state.current_error_file:
+        if (
+            error_file != st.session_state.current_error_file
+            or not st.session_state.file_loaded
+            or not st.session_state.error_sheets_cache
+        ):
             st.session_state.current_error_file = error_file
             
             with st.spinner(f"📂 Cargando {error_file}..."):
-                st.session_state.error_sheets_cache = load_error_file(error_file)
+                loaded_sheets = load_error_file(error_file)
+                st.session_state.error_sheets_cache = loaded_sheets
             
             st.session_state.file_modified = False
-            st.session_state.file_loaded = True
+            st.session_state.file_loaded = bool(loaded_sheets)
         else:
             st.info("✅ El archivo ya estaba cargado")
     
