@@ -68,11 +68,11 @@ def sync_error_file_session_state(available_files):
     """
     current_files = set(available_files)
     previous_files = set(st.session_state.get("error_repository_files", []))
-    removed_files = sorted(previous_files - current_files)
+    removed_files = previous_files - current_files
 
     current_error_file = st.session_state.get("current_error_file")
     if current_error_file and current_error_file not in current_files:
-        removed_files = sorted(set(removed_files + [current_error_file]))
+        removed_files.add(current_error_file)
         st.session_state.current_error_file = None
         st.session_state.error_sheets_cache = {}
         st.session_state.file_modified = False
@@ -83,13 +83,13 @@ def sync_error_file_session_state(available_files):
         st.session_state.selected_error_file = None
 
     if available_files:
-        if st.session_state.get("selected_error_file") not in current_files:
+        if st.session_state.get("selected_error_file") is None:
             st.session_state.selected_error_file = available_files[0]
     else:
         st.session_state.selected_error_file = None
 
     st.session_state.error_repository_files = list(available_files)
-    return removed_files
+    return sorted(removed_files)
 
 
 def load_error_file(filename):
