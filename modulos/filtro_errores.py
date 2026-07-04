@@ -21,8 +21,9 @@ MUNICIPIOS = {
     "CH": "🌊 Chorrillos"
 }
 
-ERROR_REPOSITORY_PATH = "Repositorio_de_Errores"
-RENTAS_PATH = "Rentas_resumidos"
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+ERROR_REPOSITORY_PATH = os.path.join(BASE_DIR, "Repositorio_de_Errores")
+RENTAS_PATH = os.path.join(BASE_DIR, "Rentas_resumidos")
 
 ESTADOS_VALIDOS = ["No corregido", "Corregido", "Falso positivo"]
 
