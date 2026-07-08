@@ -1,4 +1,4 @@
-# modulos/seguimiento_supervision.py
+# modulos/seguimiento_extras.py
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -23,7 +23,7 @@ TASAS_POR_HORA = {
 }
 
 # ============================================================
-# FUNCIONES DE CARGA DE DATOS (con manejo de fechas varchar)
+# FUNCIONES DE CARGA DE DATOS
 # ============================================================
 
 @st.cache_data(ttl=300)
@@ -36,15 +36,22 @@ def obtener_personal_asignado(supervisor_nombre):
 
 
 @st.cache_data(ttl=60)
-def cargar_datos_personal(fechas, personal):
+def cargar_datos_extras(fechas, personal):
+    """
+    Carga datos de horas extra desde 'registro' (tipo LIKE '%Horas Extra%')
+    y desde 'otros_registros' (motivo LIKE '%Extra%').
+    Retorna dos DataFrames: df_r (registro) y df_o (otros_registros).
+    """
     fecha_inicio, fecha_fin = fechas
     if not personal:
-        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame()
 
-    # Convertir fechas a string para la consulta (por si acaso)
     fecha_inicio_str = fecha_inicio.strftime('%Y-%m-%d')
     fecha_fin_str = fecha_fin.strftime('%Y-%m-%d')
 
+    # --- Registro (horas extra de producción/inspección) ---
+    # NOTA: el patrón LIKE va como parámetro (%s), no escrito literal en el SQL,
+    # para que psycopg2 no confunda el '%' del comodín con un placeholder.
     query_r = """
         SELECT 
             nombre, 
@@ -57,22 +64,18 @@ def cargar_datos_personal(fechas, personal):
         WHERE nombre = ANY(%s)
           AND NULLIF(TRIM(fecha), '')::date >= %s 
           AND NULLIF(TRIM(fecha), '')::date <= %s
-          AND tipo NOT IN ('Producción Horas Extras', 'Inspección Horas Extras', 'Reproceso Horas Extras')
+          AND tipo LIKE %s
     """
-    df_r = fetch_df(query_r, params=[personal, fecha_inicio_str, fecha_fin_str])
+    try:
+        df_r = fetch_df(
+            query_r,
+            params=[personal, fecha_inicio_str, fecha_fin_str, '%Horas Extra%']
+        )
+    except Exception as e:
+        st.error(f"Error al consultar registros de horas extra: {e}")
+        return pd.DataFrame(), pd.DataFrame()
 
-    query_c = """
-        SELECT 
-            nombre, 
-            NULLIF(TRIM(fecha), '')::date as fecha,
-            COALESCE(horas::float, 0) AS horas
-        FROM capacitaciones
-        WHERE nombre = ANY(%s)
-          AND NULLIF(TRIM(fecha), '')::date >= %s 
-          AND NULLIF(TRIM(fecha), '')::date <= %s
-    """
-    df_c = fetch_df(query_c, params=[personal, fecha_inicio_str, fecha_fin_str])
-
+    # --- Otros registros (motivos extra) ---
     query_o = """
         SELECT 
             nombre, 
@@ -82,57 +85,87 @@ def cargar_datos_personal(fechas, personal):
         WHERE nombre = ANY(%s)
           AND NULLIF(TRIM(fecha), '')::date >= %s 
           AND NULLIF(TRIM(fecha), '')::date <= %s
-          AND motivo NOT IN ('Horas Extra', 'Horas Extra Apoyo Otros Proyectos', 'Horas Extras', 'Reposición de tiempo')
+          AND motivo LIKE %s
     """
-    df_o = fetch_df(query_o, params=[personal, fecha_inicio_str, fecha_fin_str])
+    try:
+        df_o = fetch_df(
+            query_o,
+            params=[personal, fecha_inicio_str, fecha_fin_str, '%Extra%']
+        )
+    except Exception as e:
+        st.error(f"Error al consultar otros registros extra: {e}")
+        return df_r, pd.DataFrame()
 
-    # Asegurar que la columna fecha sea datetime (por si hay nulos)
-    for df in [df_r, df_c, df_o]:
+    # Asegurar tipos de fecha
+    for df in [df_r, df_o]:
         if not df.empty:
             df['fecha'] = pd.to_datetime(df['fecha'], errors='coerce').dt.date
 
-    return df_r, df_c, df_o
+    return df_r, df_o
 
 
 # ============================================================
 # FUNCIONES DE PROCESAMIENTO
 # ============================================================
 
-def generar_resumen_horas(df_r, df_c, df_o):
+def generar_resumen_horas_extras(df_r, df_o):
+    """Resumen diario de horas extra con columnas separadas."""
+    # Horas extra producción
     if not df_r.empty:
-        prod = df_r.groupby(['nombre', 'fecha'], as_index=False)['horas'].sum().rename(columns={'horas': 'horas_produccion'})
+        prod = df_r.groupby(['nombre', 'fecha'], as_index=False)['horas'].sum()
+        prod.rename(columns={'horas': 'horas_extra_produccion'}, inplace=True)
     else:
-        prod = pd.DataFrame(columns=['nombre', 'fecha', 'horas_produccion'])
+        prod = pd.DataFrame(columns=['nombre', 'fecha', 'horas_extra_produccion'])
 
-    if not df_c.empty:
-        cap = df_c.groupby(['nombre', 'fecha'], as_index=False)['horas'].sum().rename(columns={'horas': 'horas_capacitacion'})
-    else:
-        cap = pd.DataFrame(columns=['nombre', 'fecha', 'horas_capacitacion'])
-
+    # Horas extra otros
     if not df_o.empty:
-        otros = df_o.groupby(['nombre', 'fecha'], as_index=False)['horas'].sum().rename(columns={'horas': 'horas_otros'})
+        otros = df_o.groupby(['nombre', 'fecha'], as_index=False)['horas'].sum()
+        otros.rename(columns={'horas': 'horas_extra_otros'}, inplace=True)
     else:
-        otros = pd.DataFrame(columns=['nombre', 'fecha', 'horas_otros'])
+        otros = pd.DataFrame(columns=['nombre', 'fecha', 'horas_extra_otros'])
 
-    combinados = pd.concat([prod[['nombre', 'fecha']], cap[['nombre', 'fecha']], otros[['nombre', 'fecha']]], axis=0)
-    if combinados.empty:
-        return pd.DataFrame()
+    # Combinar todas las combinaciones nombre-fecha
+    keys = pd.concat([prod[['nombre', 'fecha']], otros[['nombre', 'fecha']]], axis=0)
+    if keys.empty:
+        return pd.DataFrame(columns=['nombre', 'fecha', 'horas_extra_produccion', 'horas_extra_otros'])
 
-    keys = combinados.drop_duplicates().reset_index(drop=True)
+    keys = keys.drop_duplicates().reset_index(drop=True)
     merged = keys.merge(prod, on=['nombre', 'fecha'], how='left')
-    merged = merged.merge(cap, on=['nombre', 'fecha'], how='left')
     merged = merged.merge(otros, on=['nombre', 'fecha'], how='left')
     merged = merged.fillna(0)
 
-    merged['total'] = merged['horas_produccion'] + merged['horas_capacitacion'] + merged['horas_otros']
-    for col in ['horas_produccion', 'horas_capacitacion', 'horas_otros', 'total']:
-        if col in merged.columns:
-            merged[col] = merged[col].round(2)
+    for col in ['horas_extra_produccion', 'horas_extra_otros']:
+        merged[col] = merged[col].round(2)
 
     return merged
 
 
-def generar_produccion_diaria(df_r):
+def generar_balance_extras(df_r, df_o):
+    """Total de horas extra por operador."""
+    if df_r.empty and df_o.empty:
+        return pd.DataFrame(columns=['nombre', 'horas_extra_produccion', 'horas_extra_otros', 'total_horas_extra'])
+
+    bal_prod = pd.DataFrame(columns=['nombre', 'horas_extra_produccion'])
+    bal_otros = pd.DataFrame(columns=['nombre', 'horas_extra_otros'])
+
+    if not df_r.empty:
+        bal_prod = df_r.groupby('nombre', as_index=False)['horas'].sum()
+        bal_prod.rename(columns={'horas': 'horas_extra_produccion'}, inplace=True)
+
+    if not df_o.empty:
+        bal_otros = df_o.groupby('nombre', as_index=False)['horas'].sum()
+        bal_otros.rename(columns={'horas': 'horas_extra_otros'}, inplace=True)
+
+    balance = pd.merge(bal_prod, bal_otros, on='nombre', how='outer').fillna(0)
+    balance['total_horas_extra'] = balance['horas_extra_produccion'] + balance['horas_extra_otros']
+    for col in ['horas_extra_produccion', 'horas_extra_otros', 'total_horas_extra']:
+        balance[col] = balance[col].round(2)
+
+    return balance[['nombre', 'horas_extra_produccion', 'horas_extra_otros', 'total_horas_extra']]
+
+
+def generar_produccion_diaria_extras(df_r):
+    """Producción, ratio y cumplimiento solo para horas extra (registro)."""
     if df_r.empty:
         return pd.DataFrame()
 
@@ -166,35 +199,8 @@ def generar_produccion_diaria(df_r):
     return grouped[columnas_finales]
 
 
-def generar_balance_operador(df_casos):
-    """
-    Calcula el balance neto de horas por operador considerando solo los casos
-    que no son fines de semana sin reporte.
-    """
-    if df_casos.empty:
-        return pd.DataFrame()
-
-    def calcular_desviacion(row):
-        if not row['tiene_reporte']:
-            # Esto no debería ocurrir porque filtramos fines de semana sin reporte,
-            # pero lo dejamos por seguridad.
-            return -8.5
-        elif row['total'] < 8.5:
-            return -(8.5 - row['total'])
-        elif row['total'] > 8.5:
-            return row['total'] - 8.5
-        else:
-            return 0.0
-
-    df_casos = df_casos.copy()
-    df_casos['desviacion'] = df_casos.apply(calcular_desviacion, axis=1)
-    balance = df_casos.groupby('nombre', as_index=False)['desviacion'].sum()
-    balance['balance_horas'] = balance['desviacion'].round(2)
-    return balance[['nombre', 'balance_horas']]
-
-
 # ============================================================
-# FUNCIÓN PRINCIPAL RENDER
+# RENDER PRINCIPAL
 # ============================================================
 
 def render():
@@ -210,28 +216,28 @@ def render():
         st.warning("No tiene personal a cargo para supervisar.")
         return
 
-    st.title("📊 Seguimiento de Supervisor")
+    st.title("⏱️ Seguimiento de Horas Extra")
     st.markdown(f"**Supervisor:** {nombre_supervisor} | **Personal a cargo:** {len(personal_asignado)}")
 
     # --- Filtro de fechas ---
     hoy = datetime.now(TZ).date()
     col1, col2 = st.columns(2)
     with col1:
-        fecha_inicio = st.date_input("Fecha de inicio", value=hoy - timedelta(days=7), key="sup_fecha_ini")
+        fecha_inicio = st.date_input("Fecha de inicio", value=hoy - timedelta(days=7), key="ext_fecha_ini")
     with col2:
-        fecha_fin = st.date_input("Fecha de fin", value=hoy, key="sup_fecha_fin")
+        fecha_fin = st.date_input("Fecha de fin", value=hoy, key="ext_fecha_fin")
 
     if fecha_inicio > fecha_fin:
         st.error("La fecha de inicio no puede ser mayor a la fecha fin.")
         return
 
-    # --- FILTRO POR OPERADOR ---
+    # --- Filtro por operador ---
     st.markdown("### 👥 Filtrar por Operador")
     personal_filtrado = st.multiselect(
         "Selecciona uno o varios operadores",
         options=personal_asignado,
         default=personal_asignado,
-        key="filtro_operador"
+        key="ext_filtro_operador"
     )
 
     if not personal_filtrado:
@@ -241,107 +247,45 @@ def render():
     st.info(f"Mostrando datos para {len(personal_filtrado)} operador(es) de {len(personal_asignado)} totales.")
 
     # --- Cargar datos ---
-    with st.spinner("Cargando datos..."):
-        df_r, df_c, df_o = cargar_datos_personal((fecha_inicio, fecha_fin), personal_filtrado)
+    with st.spinner("Cargando horas extra..."):
+        df_r, df_o = cargar_datos_extras((fecha_inicio, fecha_fin), personal_filtrado)
 
-    # --- [DEPURACIÓN] ---
+    # Si ambos DataFrames están vacíos (sin datos en el período)
+    if df_r.empty and df_o.empty:
+        st.info("No se encontraron horas extra en el período seleccionado.")
+        return
+
+    # --- Depuración opcional ---
     with st.expander("🔍 Depuración (datos cargados)"):
-        st.write("**Registro (df_r):**", f"Filas: {len(df_r)}")
-        st.dataframe(df_r.head(10))
-        st.write("**Capacitaciones (df_c):**", f"Filas: {len(df_c)}")
-        st.dataframe(df_c.head(10))
-        st.write("**Otros Registros (df_o):**", f"Filas: {len(df_o)}")
-        st.dataframe(df_o.head(10))
+        st.write("**Registro horas extra (df_r):**", f"Filas: {len(df_r)}")
+        st.dataframe(df_r.head(10) if not df_r.empty else pd.DataFrame())
+        st.write("**Otros registros extra (df_o):**", f"Filas: {len(df_o)}")
+        st.dataframe(df_o.head(10) if not df_o.empty else pd.DataFrame())
 
-    # --- 1. Resumen de Horas ---
-    st.subheader("📋 Resumen de Horas Diarias")
-    df_horas = generar_resumen_horas(df_r, df_c, df_o)
+    # --- 1. Resumen de Horas Diarias (horas extra) ---
+    st.subheader("📋 Resumen de Horas Extra Diarias")
+    df_horas = generar_resumen_horas_extras(df_r, df_o)
     if df_horas.empty:
-        st.info("No se encontraron horas registradas en el período seleccionado.")
+        st.info("No se encontraron horas extra registradas en el período seleccionado.")
+    else:
+        st.dataframe(df_horas, width='stretch')
+
+    # --- Balance de Horas Extra por Operador ---
+    st.subheader("⚖️ Total de Horas Extra por Operador")
+    df_balance = generar_balance_extras(df_r, df_o)
+    if df_balance.empty:
+        st.info("No hay horas extra para calcular el balance.")
     else:
         def color_total(val):
-            return 'background-color: #90EE90' if val == 8.5 else 'background-color: #FFD700'
-        styled_horas = df_horas.style.map(color_total, subset=['total'])
-        st.dataframe(styled_horas, use_container_width=True)
+            return 'background-color: #FFD700' if val > 0 else ''
+        styled_balance = df_balance.style.map(color_total, subset=['total_horas_extra'])
+        st.dataframe(styled_balance, width='stretch')
 
-        # --- Casos a revisar (excluyendo fines de semana sin reporte) ---
-        st.subheader("🔍 Casos a Revisar")
-        st.caption("Nota: Los fines de semana (sábado y domingo) sin reporte NO se consideran como casos a revisar.")
-        fechas_range = pd.date_range(start=fecha_inicio, end=fecha_fin, freq='D')
-        all_comb = pd.DataFrame([
-            (nombre, fecha.date())
-            for nombre in personal_filtrado
-            for fecha in fechas_range
-        ], columns=['nombre', 'fecha'])
-
-        df_completo = all_comb.merge(df_horas, on=['nombre', 'fecha'], how='left')
-        for col in ['horas_produccion', 'horas_capacitacion', 'horas_otros', 'total']:
-            if col in df_completo.columns:
-                df_completo[col] = df_completo[col].fillna(0)
-
-        df_completo['tiene_reporte'] = (
-            (df_completo['horas_produccion'] > 0) | 
-            (df_completo['horas_capacitacion'] > 0) | 
-            (df_completo['horas_otros'] > 0)
-        )
-
-        # Identificar fines de semana (dayofweek: 5=sábado, 6=domingo)
-        df_completo['es_fin_semana'] = pd.to_datetime(df_completo['fecha']).dt.dayofweek.isin([5, 6])
-
-        # Casos a revisar: total != 8.5 Y (NO es fin de semana sin reporte)
-        mask_caso = (df_completo['total'] != 8.5) & ~(df_completo['es_fin_semana'] & ~df_completo['tiene_reporte'])
-        df_casos = df_completo[mask_caso]
-
-        if df_casos.empty:
-            st.success("✅ No hay casos que requieran revisión (considerando fines de semana sin reporte).")
-        else:
-            def determinar_caso(row):
-                if not row['tiene_reporte']:
-                    return "Sin Reportes"
-                elif row['total'] < 8.5:
-                    return f"Faltan {8.5 - row['total']:.2f} horas"
-                else:
-                    return f"Excedente de {row['total'] - 8.5:.2f} horas"
-
-            df_casos['Caso'] = df_casos.apply(determinar_caso, axis=1)
-            casos_vista = df_casos[['nombre', 'fecha', 'total', 'Caso']]
-
-            def color_caso(val):
-                return 'color: red; font-weight: bold' if val == "Sin Reportes" else ''
-            styled_casos = casos_vista.style.map(color_caso, subset=['Caso'])
-            st.dataframe(styled_casos, use_container_width=True)
-
-            # --- Balance de Horas por Operador (solo sobre los casos filtrados) ---
-            st.subheader("⚖️ Balance de Horas por Operador")
-            df_balance = generar_balance_operador(df_casos)
-            if not df_balance.empty:
-                # Añadir columna de fines de semana ignorados (solo informativo)
-                fines_ignorados = df_completo[
-                    df_completo['es_fin_semana'] & ~df_completo['tiene_reporte']
-                ].groupby('nombre').size().reset_index(name='fines_sin_reporte_ignorados')
-                
-                df_balance = df_balance.merge(fines_ignorados, on='nombre', how='left').fillna(0)
-                df_balance['fines_sin_reporte_ignorados'] = df_balance['fines_sin_reporte_ignorados'].astype(int)
-
-                def color_balance(val):
-                    if val == 0:
-                        return 'background-color: #90EE90'  # verde
-                    elif val < 0:
-                        return 'background-color: #FF6B6B; color: white'  # rojo
-                    else:
-                        return 'background-color: #FFD700'  # amarillo
-
-                styled_balance = df_balance.style.map(color_balance, subset=['balance_horas'])
-                st.dataframe(styled_balance, use_container_width=True)
-                st.caption("El balance considera solo los días laborales (no fines de semana sin reporte).")
-            else:
-                st.info("No hay datos para calcular el balance.")
-
-    # --- 2. Producción Diaria por Proceso ---
-    st.subheader("📈 Producción Diaria por Proceso")
-    df_prod = generar_produccion_diaria(df_r)
+    # --- 2. Producción Diaria por Proceso (solo horas extra) ---
+    st.subheader("📈 Producción Diaria por Proceso (Horas Extra)")
+    df_prod = generar_produccion_diaria_extras(df_r)
     if df_prod.empty:
-        st.info("No hay datos de producción.")
+        st.info("No hay datos de producción en horas extra.")
     else:
         def color_cumplimiento(val):
             if val >= 90:
@@ -350,10 +294,10 @@ def render():
                 return 'background-color: #FFD700'
 
         styled_prod = df_prod.style.map(color_cumplimiento, subset=['cumplimiento'])
-        st.dataframe(styled_prod, use_container_width=True)
+        st.dataframe(styled_prod, width='stretch')
 
-        # --- Gráfico de evolución del ratio ---
-        st.subheader("📈 Evolución del Ratio por Persona (producción / horas)")
+        # --- Gráfico de evolución del ratio (solo horas extra) ---
+        st.subheader("📈 Evolución del Ratio por Persona (Horas Extra)")
         df_ratio_agg = df_r.groupby(['fecha', 'nombre'], as_index=False).agg({
             'edificas': 'sum',
             'unidades_catastrales': 'sum',
@@ -373,11 +317,11 @@ def render():
                 x='fecha',
                 y='ratio',
                 color='nombre',
-                title='Evolución del Ratio (Producción/Horas) por Persona',
+                title='Evolución del Ratio (Producción/Horas) – Horas Extra',
                 labels={'fecha': 'Fecha', 'ratio': 'Ratio (producción/hora)', 'nombre': 'Persona'},
                 markers=True
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
         else:
             st.info("No hay suficientes datos para generar el gráfico de ratios.")
 
