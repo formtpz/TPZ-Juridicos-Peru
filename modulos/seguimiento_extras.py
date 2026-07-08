@@ -49,11 +49,11 @@ def cargar_datos_extras(fechas, personal):
     fecha_inicio_str = fecha_inicio.strftime('%Y-%m-%d')
     fecha_fin_str = fecha_fin.strftime('%Y-%m-%d')
 
-    # Convertir a tupla para garantizar compatibilidad con ANY
-    personal_tuple = tuple(personal)
+    # Construir placeholders para IN (más seguro que ANY con adaptación de array)
+    placeholders = ', '.join(['%s'] * len(personal))
 
     # --- Registro (horas extra de producción/inspección) ---
-    query_r = """
+    query_r = f"""
         SELECT 
             nombre, 
             NULLIF(TRIM(fecha), '')::date as fecha,
@@ -62,35 +62,34 @@ def cargar_datos_extras(fechas, personal):
             COALESCE(unidades_catastrales::float, 0) AS unidades_catastrales,
             COALESCE(horas::float, 0) AS horas
         FROM registro
-        WHERE nombre = ANY(%s)
+        WHERE nombre IN ({placeholders})
           AND NULLIF(TRIM(fecha), '')::date >= %s 
           AND NULLIF(TRIM(fecha), '')::date <= %s
           AND tipo LIKE '%Horas Extra%'
     """
     try:
-        df_r = fetch_df(query_r, params=[personal_tuple, fecha_inicio_str, fecha_fin_str])
+        # Parámetros: lista de nombres seguida de las dos fechas
+        df_r = fetch_df(query_r, params=personal + [fecha_inicio_str, fecha_fin_str])
     except Exception as e:
         st.error(f"Error al consultar registros de horas extra: {e}")
-        st.text(f"Query: {query_r}\nParams: {[personal_tuple, fecha_inicio_str, fecha_fin_str]}")
         return pd.DataFrame(), pd.DataFrame()
 
     # --- Otros registros (motivos extra) ---
-    query_o = """
+    query_o = f"""
         SELECT 
             nombre, 
             NULLIF(TRIM(fecha), '')::date as fecha,
             COALESCE(horas::float, 0) AS horas
         FROM otros_registros
-        WHERE nombre = ANY(%s)
+        WHERE nombre IN ({placeholders})
           AND NULLIF(TRIM(fecha), '')::date >= %s 
           AND NULLIF(TRIM(fecha), '')::date <= %s
           AND motivo LIKE '%Extra%'
     """
     try:
-        df_o = fetch_df(query_o, params=[personal_tuple, fecha_inicio_str, fecha_fin_str])
+        df_o = fetch_df(query_o, params=personal + [fecha_inicio_str, fecha_fin_str])
     except Exception as e:
         st.error(f"Error al consultar otros registros extra: {e}")
-        st.text(f"Query: {query_o}\nParams: {[personal_tuple, fecha_inicio_str, fecha_fin_str]}")
         # Devolvemos df_r aunque df_o haya fallado
         return df_r, pd.DataFrame()
 
@@ -248,9 +247,9 @@ def render():
     with st.spinner("Cargando horas extra..."):
         df_r, df_o = cargar_datos_extras((fecha_inicio, fecha_fin), personal_filtrado)
 
-    # Si ocurrió un error capturado, detenemos la ejecución
+    # Si ambos DataFrames están vacíos (y no hubo error, simplemente no hay datos)
     if df_r.empty and df_o.empty:
-        st.info("No se encontraron datos de horas extra en el período seleccionado.")
+        st.info("No se encontraron horas extra en el período seleccionado.")
         return
 
     # --- Depuración opcional ---
@@ -266,7 +265,7 @@ def render():
     if df_horas.empty:
         st.info("No se encontraron horas extra registradas en el período seleccionado.")
     else:
-        st.dataframe(df_horas, width='stretch')   # Reemplazo use_container_width=True
+        st.dataframe(df_horas, width='stretch')
 
     # --- Balance de Horas Extra por Operador ---
     st.subheader("⚖️ Total de Horas Extra por Operador")
@@ -319,7 +318,7 @@ def render():
                 labels={'fecha': 'Fecha', 'ratio': 'Ratio (producción/hora)', 'nombre': 'Persona'},
                 markers=True
             )
-            st.plotly_chart(fig, width='stretch')   # Reemplazo use_container_width=True
+            st.plotly_chart(fig, width='stretch')
         else:
             st.info("No hay suficientes datos para generar el gráfico de ratios.")
 
