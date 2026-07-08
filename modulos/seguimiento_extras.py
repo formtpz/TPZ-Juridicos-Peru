@@ -141,9 +141,17 @@ def generar_resumen_horas_extras(df_r, df_o):
 
 
 def generar_balance_extras(df_r, df_o):
-    """Total de horas extra por operador."""
+    """
+    Balance de horas extra por operador.
+    'diferencia' = horas_extra_otros - horas_extra_produccion.
+    No se suman ambas columnas porque suelen representar el MISMO evento
+    reportado dos veces: una por el supervisor (otros_registros) y otra
+    por el propio operador en producción (registro). La diferencia sirve
+    para detectar descuadres entre ambos reportes (debería tender a 0
+    cuando coinciden perfectamente).
+    """
     if df_r.empty and df_o.empty:
-        return pd.DataFrame(columns=['nombre', 'horas_extra_produccion', 'horas_extra_otros', 'total_horas_extra'])
+        return pd.DataFrame(columns=['nombre', 'horas_extra_produccion', 'horas_extra_otros', 'diferencia'])
 
     bal_prod = pd.DataFrame(columns=['nombre', 'horas_extra_produccion'])
     bal_otros = pd.DataFrame(columns=['nombre', 'horas_extra_otros'])
@@ -157,11 +165,11 @@ def generar_balance_extras(df_r, df_o):
         bal_otros.rename(columns={'horas': 'horas_extra_otros'}, inplace=True)
 
     balance = pd.merge(bal_prod, bal_otros, on='nombre', how='outer').fillna(0)
-    balance['total_horas_extra'] = balance['horas_extra_produccion'] + balance['horas_extra_otros']
-    for col in ['horas_extra_produccion', 'horas_extra_otros', 'total_horas_extra']:
+    balance['diferencia'] = balance['horas_extra_otros'] - balance['horas_extra_produccion']
+    for col in ['horas_extra_produccion', 'horas_extra_otros', 'diferencia']:
         balance[col] = balance[col].round(2)
 
-    return balance[['nombre', 'horas_extra_produccion', 'horas_extra_otros', 'total_horas_extra']]
+    return balance[['nombre', 'horas_extra_produccion', 'horas_extra_otros', 'diferencia']]
 
 
 def generar_produccion_diaria_extras(df_r):
@@ -271,14 +279,23 @@ def render():
         st.dataframe(df_horas, width='stretch')
 
     # --- Balance de Horas Extra por Operador ---
-    st.subheader("⚖️ Total de Horas Extra por Operador")
+    st.subheader("⚖️ Diferencia de Horas Extra por Operador")
+    st.caption(
+        "Diferencia = Horas Extra (Otros Registros, reportadas por el supervisor) − "
+        "Horas Extra (Producción, reportadas por el operador). "
+        "Sirve para detectar reportes duplicados o descuadrados entre ambas fuentes; "
+        "en teoría debería tender a 0 cuando ambos reportes coinciden."
+    )
     df_balance = generar_balance_extras(df_r, df_o)
     if df_balance.empty:
-        st.info("No hay horas extra para calcular el balance.")
+        st.info("No hay horas extra para calcular la diferencia.")
     else:
-        def color_total(val):
-            return 'background-color: #FFD700' if val > 0 else ''
-        styled_balance = df_balance.style.map(color_total, subset=['total_horas_extra'])
+        def color_diferencia(val):
+            if val == 0:
+                return 'background-color: #90EE90'  # verde: cuadran ambos reportes
+            else:
+                return 'background-color: #FF6B6B; color: white'  # rojo: hay descuadre
+        styled_balance = df_balance.style.map(color_diferencia, subset=['diferencia'])
         st.dataframe(styled_balance, width='stretch')
 
     # --- 2. Producción Diaria por Proceso (solo horas extra) ---
