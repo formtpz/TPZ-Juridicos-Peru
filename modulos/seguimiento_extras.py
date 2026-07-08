@@ -61,7 +61,7 @@ def cargar_datos_extras(fechas, personal):
             COALESCE(edificas::float, 0) AS edificas,
             COALESCE(unidades_catastrales::float, 0) AS unidades_catastrales,
             COALESCE(horas::float, 0) AS horas
-        FROM registro
+        FROM public.registro
         WHERE nombre IN ({placeholders})
           AND NULLIF(TRIM(fecha), '')::date >= %s 
           AND NULLIF(TRIM(fecha), '')::date <= %s
@@ -80,7 +80,7 @@ def cargar_datos_extras(fechas, personal):
             nombre, 
             NULLIF(TRIM(fecha), '')::date as fecha,
             COALESCE(horas::float, 0) AS horas
-        FROM otros_registros
+        FROM public.otros_registros
         WHERE nombre IN ({placeholders})
           AND NULLIF(TRIM(fecha), '')::date >= %s 
           AND NULLIF(TRIM(fecha), '')::date <= %s
