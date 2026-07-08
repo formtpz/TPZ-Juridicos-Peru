@@ -50,6 +50,8 @@ def cargar_datos_extras(fechas, personal):
     fecha_fin_str = fecha_fin.strftime('%Y-%m-%d')
 
     # --- Registro (horas extra de producción/inspección) ---
+    # NOTA: el patrón LIKE va como parámetro (%s), no escrito literal en el SQL,
+    # para que psycopg2 no confunda el '%' del comodín con un placeholder.
     query_r = """
         SELECT 
             nombre, 
@@ -62,11 +64,13 @@ def cargar_datos_extras(fechas, personal):
         WHERE nombre = ANY(%s)
           AND NULLIF(TRIM(fecha), '')::date >= %s 
           AND NULLIF(TRIM(fecha), '')::date <= %s
-          AND tipo LIKE '%Horas Extra%'
+          AND tipo LIKE %s
     """
     try:
-        # Mismo estilo que en seguimiento_supervision.py: lista con la lista de nombres y las fechas
-        df_r = fetch_df(query_r, params=[personal, fecha_inicio_str, fecha_fin_str])
+        df_r = fetch_df(
+            query_r,
+            params=[personal, fecha_inicio_str, fecha_fin_str, '%Horas Extra%']
+        )
     except Exception as e:
         st.error(f"Error al consultar registros de horas extra: {e}")
         return pd.DataFrame(), pd.DataFrame()
@@ -81,10 +85,13 @@ def cargar_datos_extras(fechas, personal):
         WHERE nombre = ANY(%s)
           AND NULLIF(TRIM(fecha), '')::date >= %s 
           AND NULLIF(TRIM(fecha), '')::date <= %s
-          AND motivo LIKE '%Extra%'
+          AND motivo LIKE %s
     """
     try:
-        df_o = fetch_df(query_o, params=[personal, fecha_inicio_str, fecha_fin_str])
+        df_o = fetch_df(
+            query_o,
+            params=[personal, fecha_inicio_str, fecha_fin_str, '%Extra%']
+        )
     except Exception as e:
         st.error(f"Error al consultar otros registros extra: {e}")
         return df_r, pd.DataFrame()
