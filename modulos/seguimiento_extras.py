@@ -49,11 +49,8 @@ def cargar_datos_extras(fechas, personal):
     fecha_inicio_str = fecha_inicio.strftime('%Y-%m-%d')
     fecha_fin_str = fecha_fin.strftime('%Y-%m-%d')
 
-    # Construir placeholders para IN (más seguro que ANY con adaptación de array)
-    placeholders = ', '.join(['%s'] * len(personal))
-
     # --- Registro (horas extra de producción/inspección) ---
-    query_r = f"""
+    query_r = """
         SELECT 
             nombre, 
             NULLIF(TRIM(fecha), '')::date as fecha,
@@ -61,36 +58,35 @@ def cargar_datos_extras(fechas, personal):
             COALESCE(edificas::float, 0) AS edificas,
             COALESCE(unidades_catastrales::float, 0) AS unidades_catastrales,
             COALESCE(horas::float, 0) AS horas
-        FROM public.registro
-        WHERE nombre IN ({placeholders})
+        FROM registro
+        WHERE nombre = ANY(%s)
           AND NULLIF(TRIM(fecha), '')::date >= %s 
           AND NULLIF(TRIM(fecha), '')::date <= %s
           AND tipo LIKE '%Horas Extra%'
     """
     try:
-        # Parámetros: lista de nombres seguida de las dos fechas
-        df_r = fetch_df(query_r, params=personal + [fecha_inicio_str, fecha_fin_str])
+        # Mismo estilo que en seguimiento_supervision.py: lista con la lista de nombres y las fechas
+        df_r = fetch_df(query_r, params=[personal, fecha_inicio_str, fecha_fin_str])
     except Exception as e:
         st.error(f"Error al consultar registros de horas extra: {e}")
         return pd.DataFrame(), pd.DataFrame()
 
     # --- Otros registros (motivos extra) ---
-    query_o = f"""
+    query_o = """
         SELECT 
             nombre, 
             NULLIF(TRIM(fecha), '')::date as fecha,
             COALESCE(horas::float, 0) AS horas
-        FROM public.otros_registros
-        WHERE nombre IN ({placeholders})
+        FROM otros_registros
+        WHERE nombre = ANY(%s)
           AND NULLIF(TRIM(fecha), '')::date >= %s 
           AND NULLIF(TRIM(fecha), '')::date <= %s
           AND motivo LIKE '%Extra%'
     """
     try:
-        df_o = fetch_df(query_o, params=personal + [fecha_inicio_str, fecha_fin_str])
+        df_o = fetch_df(query_o, params=[personal, fecha_inicio_str, fecha_fin_str])
     except Exception as e:
         st.error(f"Error al consultar otros registros extra: {e}")
-        # Devolvemos df_r aunque df_o haya fallado
         return df_r, pd.DataFrame()
 
     # Asegurar tipos de fecha
@@ -247,7 +243,7 @@ def render():
     with st.spinner("Cargando horas extra..."):
         df_r, df_o = cargar_datos_extras((fecha_inicio, fecha_fin), personal_filtrado)
 
-    # Si ambos DataFrames están vacíos (y no hubo error, simplemente no hay datos)
+    # Si ambos DataFrames están vacíos (sin datos en el período)
     if df_r.empty and df_o.empty:
         st.info("No se encontraron horas extra en el período seleccionado.")
         return
