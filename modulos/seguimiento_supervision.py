@@ -28,9 +28,19 @@ TASAS_POR_HORA = {
 
 @st.cache_data(ttl=300)
 def obtener_personal_asignado(supervisor_nombre):
+    """
+    Trae al personal a cargo del supervisor (supervisor = nombre_supervisor)
+    Y ADEMÁS incluye al propio supervisor (nombre = nombre_supervisor),
+    para que pueda ver/reportar sus propias horas junto a las de su equipo.
+    """
     df = fetch_df(
-        "SELECT nombre FROM usuarios WHERE supervisor = %s AND estado = 'Activo' ORDER BY nombre",
-        params=[supervisor_nombre]
+        """
+        SELECT nombre FROM usuarios 
+        WHERE (supervisor = %s OR nombre = %s) 
+          AND estado = 'Activo' 
+        ORDER BY nombre
+        """,
+        params=[supervisor_nombre, supervisor_nombre]
     )
     return df['nombre'].tolist() if not df.empty else []
 
