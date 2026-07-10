@@ -76,7 +76,7 @@ PERMISOS = {
         "Seguimiento Supervisor",
         "Cerrar Sesion"
     ],
-    "1;Coordinador;"Madeline Hernandez Gamboa": [
+    "1;Coordinador;Madeline Hernandez Gamboa": [
         "Seguimiento Extras",
         "Cerrar Sesion"
     ],    
