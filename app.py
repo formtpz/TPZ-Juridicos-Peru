@@ -154,10 +154,10 @@ elif opcion == "Resultados Calidad":
 
 
 # Correcciones
-#elif opcion == "Correcciones":
+elif opcion == "Seguimiento Extras":
 
-#    from modulos.correcciones import render
-#    render()
+    from modulos.seguimiento_extras_admin import render
+    render()
 
 
 elif opcion == "Rentas Filtrado":
