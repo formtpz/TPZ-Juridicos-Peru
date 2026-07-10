@@ -113,13 +113,18 @@ def cargar_datos_extras(fechas, personal):
 # ============================================================
 
 def generar_resumen_horas_extras(df_r, df_o):
-    """Resumen diario de horas extra con columnas separadas."""
-    # Horas extra producción
+    """Resumen diario de horas extra con columnas separadas, incluyendo producción."""
+    # Horas extra producción y producción (edificas + uu_catastrales)
     if not df_r.empty:
-        prod = df_r.groupby(['nombre', 'fecha'], as_index=False)['horas'].sum()
-        prod.rename(columns={'horas': 'horas_extra_produccion'}, inplace=True)
+        prod = df_r.groupby(['nombre', 'fecha'], as_index=False).agg(
+            horas_extra_produccion=('horas', 'sum'),
+            edificas_sum=('edificas', 'sum'),
+            unidades_catastrales_sum=('unidades_catastrales', 'sum')
+        )
+        prod['produccion'] = prod['edificas_sum'] + prod['unidades_catastrales_sum']
+        prod.drop(['edificas_sum', 'unidades_catastrales_sum'], axis=1, inplace=True)
     else:
-        prod = pd.DataFrame(columns=['nombre', 'fecha', 'horas_extra_produccion'])
+        prod = pd.DataFrame(columns=['nombre', 'fecha', 'horas_extra_produccion', 'produccion'])
 
     # Horas extra otros
     if not df_o.empty:
@@ -131,18 +136,19 @@ def generar_resumen_horas_extras(df_r, df_o):
     # Combinar todas las combinaciones nombre-fecha
     keys = pd.concat([prod[['nombre', 'fecha']], otros[['nombre', 'fecha']]], axis=0)
     if keys.empty:
-        return pd.DataFrame(columns=['nombre', 'fecha', 'horas_extra_produccion', 'horas_extra_otros'])
+        return pd.DataFrame(columns=['nombre', 'fecha', 'horas_extra_produccion', 'produccion', 'horas_extra_otros'])
 
     keys = keys.drop_duplicates().reset_index(drop=True)
     merged = keys.merge(prod, on=['nombre', 'fecha'], how='left')
     merged = merged.merge(otros, on=['nombre', 'fecha'], how='left')
     merged = merged.fillna(0)
 
+    # Redondear
+    merged['produccion'] = merged['produccion'].round(2)
     for col in ['horas_extra_produccion', 'horas_extra_otros']:
         merged[col] = merged[col].round(2)
 
     return merged
-
 
 def generar_balance_extras(df_r, df_o):
     """
