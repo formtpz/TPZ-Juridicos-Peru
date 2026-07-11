@@ -113,13 +113,18 @@ def cargar_datos_extras(fechas, personal):
 # ============================================================
 
 def generar_resumen_horas_extras(df_r, df_o):
-    """Resumen diario de horas extra con columnas separadas."""
-    # Horas extra producción
+    """Resumen diario de horas extra con columnas separadas, incluyendo producción."""
+    # Horas extra producción y producción (edificas + uu_catastrales)
     if not df_r.empty:
-        prod = df_r.groupby(['nombre', 'fecha'], as_index=False)['horas'].sum()
-        prod.rename(columns={'horas': 'horas_extra_produccion'}, inplace=True)
+        prod = df_r.groupby(['nombre', 'fecha'], as_index=False).agg(
+            horas_extra_produccion=('horas', 'sum'),
+            edificas_sum=('edificas', 'sum'),
+            unidades_catastrales_sum=('unidades_catastrales', 'sum')
+        )
+        prod['produccion'] = prod['edificas_sum'] + prod['unidades_catastrales_sum']
+        prod.drop(['edificas_sum', 'unidades_catastrales_sum'], axis=1, inplace=True)
     else:
-        prod = pd.DataFrame(columns=['nombre', 'fecha', 'horas_extra_produccion'])
+        prod = pd.DataFrame(columns=['nombre', 'fecha', 'horas_extra_produccion', 'produccion'])
 
     # Horas extra otros
     if not df_o.empty:
@@ -131,18 +136,19 @@ def generar_resumen_horas_extras(df_r, df_o):
     # Combinar todas las combinaciones nombre-fecha
     keys = pd.concat([prod[['nombre', 'fecha']], otros[['nombre', 'fecha']]], axis=0)
     if keys.empty:
-        return pd.DataFrame(columns=['nombre', 'fecha', 'horas_extra_produccion', 'horas_extra_otros'])
+        return pd.DataFrame(columns=['nombre', 'fecha', 'horas_extra_produccion', 'produccion', 'horas_extra_otros'])
 
     keys = keys.drop_duplicates().reset_index(drop=True)
     merged = keys.merge(prod, on=['nombre', 'fecha'], how='left')
     merged = merged.merge(otros, on=['nombre', 'fecha'], how='left')
     merged = merged.fillna(0)
 
+    # Redondear
+    merged['produccion'] = merged['produccion'].round(2)
     for col in ['horas_extra_produccion', 'horas_extra_otros']:
         merged[col] = merged[col].round(2)
 
     return merged
-
 
 def generar_balance_extras(df_r, df_o):
     """
@@ -211,6 +217,47 @@ def generar_produccion_diaria_extras(df_r):
     return grouped[columnas_finales]
 
 
+def generar_horas_por_dia_proceso(df_r):
+    """
+    Agrega df_r por fecha y proceso: suma de horas y de producción
+    (edificas + unidades_catastrales). Base para el gráfico apilado
+    de horas extra por día, coloreado por proceso.
+    """
+    if df_r.empty:
+        return pd.DataFrame(columns=['fecha', 'proceso', 'horas', 'produccion'])
+
+    agg = df_r.groupby(['fecha', 'proceso'], as_index=False).agg({
+        'horas': 'sum',
+        'edificas': 'sum',
+        'unidades_catastrales': 'sum'
+    })
+    agg['produccion'] = agg['edificas'] + agg['unidades_catastrales']
+    agg['horas'] = agg['horas'].round(2)
+    agg['produccion'] = agg['produccion'].round(2)
+    return agg[['fecha', 'proceso', 'horas', 'produccion']]
+
+
+def generar_resumen_produccion_por_proceso(df_r):
+    """
+    Resumen total (sumando TODOS los días del rango seleccionado) por proceso:
+    total de horas extra y total de producción (edificas + unidades_catastrales).
+    """
+    if df_r.empty:
+        return pd.DataFrame(columns=['proceso', 'horas', 'produccion'])
+
+    resumen = df_r.groupby('proceso', as_index=False).agg({
+        'horas': 'sum',
+        'edificas': 'sum',
+        'unidades_catastrales': 'sum'
+    })
+    resumen['produccion'] = resumen['edificas'] + resumen['unidades_catastrales']
+    resumen = resumen[['proceso', 'horas', 'produccion']]
+    resumen['horas'] = resumen['horas'].round(2)
+    resumen['produccion'] = resumen['produccion'].round(2)
+    resumen = resumen.sort_values('horas', ascending=False).reset_index(drop=True)
+    return resumen
+
+
 # ============================================================
 # RENDER PRINCIPAL
 # ============================================================
@@ -271,9 +318,55 @@ def render():
     # --- Depuración opcional ---
     with st.expander("🔍 Depuración (datos cargados)"):
         st.write("**Registro horas extra (df_r):**", f"Filas: {len(df_r)}")
-        st.dataframe(df_r.head(10) if not df_r.empty else pd.DataFrame())
+        mostrar_todo_r = st.checkbox("Mostrar todas las filas de df_r", value=False, key="ext_adm_debug_full_r")
+        if not df_r.empty:
+            st.dataframe(df_r if mostrar_todo_r else df_r.head(10), width='stretch')
+        else:
+            st.dataframe(pd.DataFrame())
+
         st.write("**Otros registros extra (df_o):**", f"Filas: {len(df_o)}")
-        st.dataframe(df_o.head(10) if not df_o.empty else pd.DataFrame())
+        mostrar_todo_o = st.checkbox("Mostrar todas las filas de df_o", value=False, key="ext_adm_debug_full_o")
+        if not df_o.empty:
+            st.dataframe(df_o if mostrar_todo_o else df_o.head(10), width='stretch')
+        else:
+            st.dataframe(pd.DataFrame())
+
+    # --- NUEVO: Horas Extra por Día y Proceso (gráfico apilado, solo df_r/registro) ---
+    st.subheader("📊 Horas Extra por Día y Proceso (Registro)")
+    df_horas_dia_proceso = generar_horas_por_dia_proceso(df_r)
+    if df_horas_dia_proceso.empty:
+        st.info("No hay datos en 'registro' para graficar horas extra por proceso.")
+    else:
+        fig_stack = px.bar(
+            df_horas_dia_proceso,
+            x='fecha',
+            y='horas',
+            color='proceso',
+            barmode='stack',
+            custom_data=['proceso', 'produccion'],
+            title='Horas Extra por Día, Apiladas por Proceso',
+            labels={'fecha': 'Fecha', 'horas': 'Horas Extra (suma)', 'proceso': 'Proceso'}
+        )
+        fig_stack.update_traces(
+            hovertemplate=(
+                "<b>%{customdata[0]}</b><br>"
+                "Fecha: %{x}<br>"
+                "Horas Extra: %{y}<br>"
+                "Producción (edificas + unidades catastrales): %{customdata[1]}"
+                "<extra></extra>"
+            )
+        )
+        fig_stack.update_layout(xaxis_title='Fecha', yaxis_title='Horas Extra (suma)')
+        st.plotly_chart(fig_stack, width='stretch')
+        st.caption("Pasa el mouse sobre cada segmento para ver la producción (edificas + unidades catastrales) de ese proceso ese día.")
+
+    # --- NUEVO: Resumen de Producción Horas Extra (rango completo) ---
+    st.subheader("📦 Resumen de Producción Horas Extra (Para el rango de fechas seleccionado)")
+    df_resumen_proceso = generar_resumen_produccion_por_proceso(df_r)
+    if df_resumen_proceso.empty:
+        st.info("No hay datos de producción en horas extra para el rango seleccionado.")
+    else:
+        st.dataframe(df_resumen_proceso, width='stretch')
 
     # --- 1. Resumen de Horas Diarias (horas extra) ---
     st.subheader("📋 Resumen de Horas Extra Diarias")
