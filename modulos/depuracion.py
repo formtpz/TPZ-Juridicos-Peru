@@ -2,7 +2,13 @@
 import streamlit as st
 import pandas as pd
 from io import BytesIO
+from pathlib import Path
 from permisos import validar_acceso
+
+ENTREGAS_FILES = {
+    "Entregas a COFOPRI": "Entregas_a_cofopri.xlsx",
+    "Entregas a Campo": "Entregas_a_campo.xlsx",
+}
 
 def normalize_concat_sec(value, width=5):
     if pd.isna(value):
@@ -70,11 +76,36 @@ def render():
     # --- Configuración extra para modo Polígono ---
     poligonos_sel = None
     df_entregas = None
+    fuente_entregas = None
     if modo == "Polígono (Excel)":
+        fuente_entregas = st.selectbox(
+            "Fuente de entregas:",
+            ["Entregas a COFOPRI", "Entregas a Campo", "Ambas"]
+        )
+
+        archivos_entrega = []
+        if fuente_entregas == "Ambas":
+            archivos_entrega = list(ENTREGAS_FILES.values())
+        else:
+            archivos_entrega = [ENTREGAS_FILES[fuente_entregas]]
+
         try:
-            df_entregas = pd.read_excel("Rentas_resumidos/Entregas_a_cofopri.xlsx", engine="openpyxl")
+            frames = []
+            for nombre_archivo in archivos_entrega:
+                ruta_entrega = Path("Rentas_resumidos") / nombre_archivo
+                df_tmp = pd.read_excel(ruta_entrega, engine="openpyxl")
+                df_tmp["fuente_entrega"] = nombre_archivo
+                frames.append(df_tmp)
+
+            df_entregas = pd.concat(frames, ignore_index=True)
+
+            columnas_requeridas = {"poligono", "concat_sec"}
+            faltantes = columnas_requeridas.difference(df_entregas.columns)
+            if faltantes:
+                st.error(f"Faltan columnas requeridas en los archivos de entregas: {sorted(faltantes)}")
+                return
         except Exception as e:
-            st.error(f"Error al cargar Entregas_a_cofopri.xlsx: {e}")
+            st.error(f"Error al cargar los archivos de entregas ({', '.join(archivos_entrega)}): {e}")
             return
 
         # Selección múltiple de polígonos disponibles
@@ -153,10 +184,14 @@ def render():
                     st.warning("⚠️ Seleccione al menos un polígono para aplicar el filtro.")
                     continue
 
+                if df_entregas is None:
+                    st.error("No se pudo inicializar la fuente de entregas para el filtrado por polígono.")
+                    continue
+
                 df_entregas_sel = df_entregas[df_entregas['poligono'].isin(poligonos_sel)]
 
                 if df_entregas_sel.empty:
-                    st.warning(f"⚠️ No se encontraron registros en Entregas_a_cofopri.xlsx para los polígonos seleccionados.")
+                    st.warning(f"⚠️ No se encontraron registros en la fuente seleccionada ({fuente_entregas}) para los polígonos seleccionados.")
                     continue
 
                 # Extraer los 5 dígitos (posiciones 7–11) según la columna usada
@@ -176,14 +211,17 @@ def render():
 
                 # Join con entregas seleccionadas
                 df_filtrado = df.merge(
-                    df_entregas_sel[["concat_sec", "poligono"]],
+                    df_entregas_sel[["concat_sec", "poligono", "fuente_entrega"]],
                     left_on="SecManz",
                     right_on="concat_sec",
                     how="inner"
                 )
 
-                # Agregar columna Poligono
-                df_filtrado.rename(columns={"poligono": "Poligono"}, inplace=True)
+                # Agregar columna Poligono y fuente de entrega
+                df_filtrado.rename(
+                    columns={"poligono": "Poligono", "fuente_entrega": "Fuente_Entrega"},
+                    inplace=True
+                )
 
                 st.write(f"**Filas encontradas:** {len(df_filtrado)}")
                 st.dataframe(df_filtrado.head(20), use_container_width=True)
@@ -199,9 +237,6 @@ def render():
                     file_name=f"Filtrado_{'_'.join(poligonos_sel)}_{archivo.name}",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
-
-        except Exception as e:
-            st.error(f"Error al procesar {archivo.name}: {e}")
 
         except Exception as e:
             st.error(f"Error al procesar {archivo.name}: {e}")
