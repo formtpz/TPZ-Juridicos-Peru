@@ -65,6 +65,10 @@ PERMISOS = {
         "Filtro de Errores",
         "Resultados Calidad",   # opción extra que no tiene el perfil 4 base
         "Cerrar Sesion"
+    ],  
+    "4;Visualizador;Talhia Araujo": [
+    
+        "Depuración de Datos"
     ],
     "2;Supervisor;Jeison Steven Alvarado Fernandez": [
         "Depuración de Datos",
