@@ -98,6 +98,11 @@ if opcion == "Depuración de Datos":
     from modulos.depuracion import render
     render()
 
+elif opcion == "Unidades Administrativas por Lote":
+
+    from modulos.unidades_administrativas_lote import render
+    render()
+
 
 # Reglas
 elif opcion == "Reglas":

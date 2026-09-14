@@ -2,36 +2,13 @@
 import streamlit as st
 import pandas as pd
 from io import BytesIO
-from pathlib import Path
 from permisos import validar_acceso
-
-ENTREGAS_FILES = {
-    "Entregas a COFOPRI": "Entregas_a_cofopri.xlsx",
-    "Entregas a Campo": "Entregas_a_campo.xlsx",
-}
-
-def normalize_concat_sec(value, width=5):
-    if pd.isna(value):
-        return None
-    text = str(value).strip()
-    if text.endswith(".0"):
-        text = text[:-2]
-    text = text.replace(" ", "")
-    if text.isdigit():
-        return text.zfill(width)
-    return text
-
-
-def normalize_segment(value, start, end, pad_length=None):
-    if pd.isna(value):
-        return None
-    text = str(value).strip()
-    if text.endswith(".0"):
-        text = text[:-2]
-    text = text.replace(" ", "")
-    if pad_length:
-        text = text.zfill(pad_length)
-    return text[start:end]
+from modulos.depuracion_comun import (
+    delivery_file_names,
+    load_deliveries,
+    normalize_concat_sec,
+    normalize_segment,
+)
 
 def parse_manzanas_input(texto: str):
     if not texto or not texto.strip():
@@ -83,27 +60,10 @@ def render():
             ["Entregas a COFOPRI", "Entregas a Campo", "Ambas"]
         )
 
-        archivos_entrega = []
-        if fuente_entregas == "Ambas":
-            archivos_entrega = list(ENTREGAS_FILES.values())
-        else:
-            archivos_entrega = [ENTREGAS_FILES[fuente_entregas]]
+        archivos_entrega = delivery_file_names(fuente_entregas)
 
         try:
-            frames = []
-            for nombre_archivo in archivos_entrega:
-                ruta_entrega = Path("Rentas_resumidos") / nombre_archivo
-                df_tmp = pd.read_excel(ruta_entrega, engine="openpyxl")
-                df_tmp["fuente_entrega"] = nombre_archivo
-                frames.append(df_tmp)
-
-            df_entregas = pd.concat(frames, ignore_index=True)
-
-            columnas_requeridas = {"poligono", "concat_sec"}
-            faltantes = columnas_requeridas.difference(df_entregas.columns)
-            if faltantes:
-                st.error(f"Faltan columnas requeridas en los archivos de entregas: {sorted(faltantes)}")
-                return
+            df_entregas = load_deliveries(fuente_entregas)
         except Exception as e:
             st.error(f"Error al cargar los archivos de entregas ({', '.join(archivos_entrega)}): {e}")
             return

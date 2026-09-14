@@ -86,6 +86,11 @@ PERMISOS = {
     ],    
 }
 
+# El módulo de UA por lote hereda exactamente los accesos de Depuración de Datos.
+for _opciones in PERMISOS.values():
+    if "Depuración de Datos" in _opciones and "Unidades Administrativas por Lote" not in _opciones:
+        _opciones.insert(_opciones.index("Depuración de Datos") + 1, "Unidades Administrativas por Lote")
+
 # =====================================================
 # FUNCIÓN PARA OBTENER PERMISOS (jerárquica)
 # =====================================================
